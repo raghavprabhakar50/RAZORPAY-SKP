@@ -11,13 +11,19 @@ class FirstSplashScreen extends StatefulWidget {
   State<FirstSplashScreen> createState() => _FirstSplashScreenState();
 }
 
-class _FirstSplashScreenState extends State<FirstSplashScreen> {
+class _FirstSplashScreenState extends State<FirstSplashScreen>
+    with SingleTickerProviderStateMixin {
   Timer? _transitionTimer;
+  late final AnimationController _mandalaController;
 
   @override
   void initState() {
     super.initState();
-    _transitionTimer = Timer(const Duration(seconds: 2), _openNext);
+    _mandalaController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat();
+    _transitionTimer = Timer(const Duration(seconds: 4), _openNext);
   }
 
   void _openNext() {
@@ -35,6 +41,7 @@ class _FirstSplashScreenState extends State<FirstSplashScreen> {
   @override
   void dispose() {
     _transitionTimer?.cancel();
+    _mandalaController.dispose();
     super.dispose();
   }
 
@@ -42,6 +49,7 @@ class _FirstSplashScreenState extends State<FirstSplashScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _FirstSplashBackground(
+        mandalaAnimation: _mandalaController,
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: .82, end: 1),
           duration: const Duration(milliseconds: 900),
@@ -69,16 +77,61 @@ class _FirstSplashScreenState extends State<FirstSplashScreen> {
 }
 
 class _FirstSplashBackground extends StatelessWidget {
-  const _FirstSplashBackground({required this.child});
+  const _FirstSplashBackground({
+    required this.child,
+    required this.mandalaAnimation,
+  });
 
   final Widget child;
+  final Animation<double> mandalaAnimation;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.asset('assets/images/splash bg.png', fit: BoxFit.cover),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xffffffff), Color(0xfffae9cb)],
+              stops: [0.18, 1],
+            ),
+          ),
+        ),
+        Positioned(
+          top: 42,
+          right: -89,
+          child: RotationTransition(
+            turns: mandalaAnimation,
+            child: Opacity(
+              opacity: .48,
+              child: Image.asset(
+                'assets/images/mandala 2.png',
+                width: 178,
+                height: 178,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: -112,
+          bottom: -108,
+          child: RotationTransition(
+            turns: Tween<double>(begin: 0, end: -1).animate(mandalaAnimation),
+            child: Opacity(
+              opacity: .7,
+              child: Image.asset(
+                'assets/images/mandela ful.png',
+                width: 270,
+                height: 270,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        ),
         SafeArea(
           child: Column(
             children: [
@@ -102,7 +155,7 @@ class _FirstLoadingLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 68),
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(seconds: 4),
       curve: Curves.easeInOutCubic,
       builder: (_, width, _) => Container(
         width: width,

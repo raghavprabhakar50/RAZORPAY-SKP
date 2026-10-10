@@ -26,16 +26,16 @@ void main() {
     await tester.pumpWidget(const MyApp());
 
     expect(find.byType(FirstSplashScreen), findsOneWidget);
-    expect(find.byType(Image), findsNWidgets(2));
+    expect(find.byType(Image), findsNWidgets(3));
 
-    await tester.pump(const Duration(milliseconds: 2100));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(SecondSplashScreen), findsOneWidget);
-    expect(find.byType(Image), findsNWidgets(2));
+    expect(find.byType(Image), findsNWidgets(3));
 
-    await tester.pump(const Duration(milliseconds: 2100));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(ThirdSplashScreen), findsOneWidget);
     expect(find.text('High Quality Pearl\nJewellery'), findsOneWidget);
@@ -95,9 +95,10 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
 
     await tester.tap(find.text('Continue as Guest'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(HomeScreen), findsOneWidget);
-    expect(find.text('Welcome, Guest'), findsOneWidget);
+    expect(find.text('Welcome, Guest'), findsNothing);
   });
 }

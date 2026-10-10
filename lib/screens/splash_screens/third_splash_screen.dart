@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../login/login_screen.dart';
@@ -12,15 +14,40 @@ class ThirdSplashScreen extends StatefulWidget {
 
 class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
   final PageController _pageController = PageController();
+  Timer? _autoAdvanceTimer;
   int _activePage = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    _scheduleAutoAdvance();
+  }
+
+  void _scheduleAutoAdvance() {
+    _autoAdvanceTimer?.cancel();
+    _autoAdvanceTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      if (_activePage == 0) {
+        _pageController.animateToPage(
+          1,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _openLogin();
+      }
+    });
+  }
+
   void _openLogin() {
+    _autoAdvanceTimer?.cancel();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
     );
   }
 
   void _handleNext() {
+    _autoAdvanceTimer?.cancel();
     if (_activePage == 0) {
       _pageController.animateToPage(
         1,
@@ -34,6 +61,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
 
   @override
   void dispose() {
+    _autoAdvanceTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -46,7 +74,10 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
       content: PageView(
         controller: _pageController,
         physics: const ClampingScrollPhysics(),
-        onPageChanged: (page) => setState(() => _activePage = page),
+        onPageChanged: (page) {
+          setState(() => _activePage = page);
+          _scheduleAutoAdvance();
+        },
         children: const [
           OnboardingPageContent(
             title: 'High Quality Pearl\nJewellery',
