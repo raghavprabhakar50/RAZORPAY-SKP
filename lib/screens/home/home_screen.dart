@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../models/discount_banner.dart';
 import '../../models/home_catalog.dart';
 import '../../models/home_slide.dart';
+import '../../widgets/app_shimmer.dart';
+import '../product/product_details_screen.dart';
 import '../../services/shopify_storefront_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -36,14 +39,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final results = await Future.wait<Object>([
       _storefrontService.fetchHomeSlides(),
       _storefrontService.fetchHomeCatalog(),
+      _storefrontService.fetchDiscountBanners(),
     ]);
     final slides = results[0] as List<HomeSlide>;
     final catalog = results[1] as HomeCatalogData;
+    final discountBanners = results[2] as List<DiscountBanner>;
     return _HomeData(
       slides: slides,
       collections: catalog.collections,
       products: catalog.products,
       priceCollections: catalog.priceCollections,
+      discountBanners: discountBanners,
     );
   }
 
@@ -92,9 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
         future: _homeData,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const SafeArea(
-              child: Center(child: CircularProgressIndicator(color: _brown)),
-            );
+            return const _HomeLoadingShimmer();
           }
           if (snapshot.hasError || !snapshot.hasData) {
             return SafeArea(child: _HomeError(onRetry: _reload));
@@ -178,10 +182,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                         ),
                       ],
-                      const SizedBox(height: 47),
-                      if (data.slides.isNotEmpty)
-                        _DiscountBanner(slide: data.slides.last),
-                      const SizedBox(height: 34),
+                      if (data.discountBanners.isNotEmpty) ...[
+                        const SizedBox(height: 47),
+                        _DiscountCarousel(banners: data.discountBanners),
+                        const SizedBox(height: 34),
+                      ] else
+                        const SizedBox(height: 34),
                       _SectionHeader(
                         title: 'Latest Arrivals',
                         onSeeAll: () => _showTarget('All products'),
@@ -203,7 +209,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           itemBuilder: (context, index) => _ProductCard(
                             product: products[index],
-                            onTap: () => _showTarget(products[index].title),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ProductDetailsScreen(
+                                  product: products[index],
+                                  storefrontService: _storefrontService,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -219,18 +232,106 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+class _HomeLoadingShimmer extends StatelessWidget {
+  const _HomeLoadingShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(17, 25, 17, 18),
+            child: AppShimmer(
+              child: Column(
+                children: [
+                  const Row(
+                    children: [
+                      ShimmerBox(width: 48, height: 48, borderRadius: 24),
+                      Spacer(),
+                      ShimmerBox(width: 48, height: 48, borderRadius: 24),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  const ShimmerBox(height: 50, borderRadius: 25),
+                  const SizedBox(height: 18),
+                  const ShimmerBox(height: 190, borderRadius: 12),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(17, 22, 17, 20),
+              decoration: const BoxDecoration(
+                color: Color(0xfffdfcfb),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+              ),
+              child: AppShimmer(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const ShimmerBox(width: 145, height: 27),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 112,
+                      child: Row(
+                        children: List.generate(
+                          4,
+                          (index) => const Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(right: 10),
+                              child: ShimmerBox(borderRadius: 9),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    const ShimmerBox(width: 175, height: 27),
+                    const SizedBox(height: 15),
+                    const Row(
+                      children: [
+                        Expanded(child: ShimmerBox(height: 48)),
+                        SizedBox(width: 12),
+                        Expanded(child: ShimmerBox(height: 48)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Row(
+                      children: [
+                        Expanded(child: ShimmerBox(height: 48)),
+                        SizedBox(width: 12),
+                        Expanded(child: ShimmerBox(height: 48)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HomeData {
   const _HomeData({
     required this.slides,
     required this.collections,
     required this.products,
     required this.priceCollections,
+    required this.discountBanners,
   });
 
   final List<HomeSlide> slides;
   final List<StorefrontCollection> collections;
   final List<StorefrontProduct> products;
   final List<StorefrontCollection> priceCollections;
+  final List<DiscountBanner> discountBanners;
 }
 
 class _HomeHeader extends StatelessWidget {
@@ -375,8 +476,8 @@ class _HeroCarouselState extends State<_HeroCarousel> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.network(
-                      slide.imageUrl,
+                    ShimmerNetworkImage(
+                      url: slide.imageUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (_, _, _) => const ColoredBox(
                         color: Color(0xffd9c2b2),
@@ -659,69 +760,117 @@ class _PriceSelector extends StatelessWidget {
   }
 }
 
-class _DiscountBanner extends StatelessWidget {
-  const _DiscountBanner({required this.slide});
+class _DiscountCarousel extends StatefulWidget {
+  const _DiscountCarousel({required this.banners});
 
-  final HomeSlide slide;
+  final List<DiscountBanner> banners;
+
+  @override
+  State<_DiscountCarousel> createState() => _DiscountCarouselState();
+}
+
+class _DiscountCarouselState extends State<_DiscountCarousel> {
+  late final PageController _controller;
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        height: 188,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(slide.imageUrl, fit: BoxFit.cover),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xde1b1615), Color(0x251b1615)],
+    return SizedBox(
+      height: 210,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: widget.banners.length,
+            onPageChanged: (page) => setState(() => _page = page),
+            itemBuilder: (context, index) {
+              final banner = widget.banners[index];
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: widget.banners.length > 1 ? 4 : 0,
                 ),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(19, 16, 15, 15),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: FractionallySizedBox(
-                  widthFactor: .60,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
                     children: [
-                      Text(
-                        'Discounts And\nOffers',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'Fraunces',
-                          fontSize: 28,
-                          height: .98,
-                          fontWeight: FontWeight.w600,
+                      _NetworkImage(url: banner.imageUrl, fit: BoxFit.cover),
+                      if (banner.showOverlay) ...[
+                        const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xde1b1615), Color(0x251b1615)],
+                            ),
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 9),
-                      Text(
-                        'Fresh picks and special prices from Shopify',
-                        style: TextStyle(
-                          color: Color(0xffffd67f),
-                          fontSize: 14,
-                          height: 1.35,
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(19, 16, 15, 30),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: .64,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    banner.heading,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontFamily: 'Fraunces',
+                                      fontSize: 28,
+                                      height: .98,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (banner.subtitle.isNotEmpty) ...[
+                                    const SizedBox(height: 9),
+                                    Text(
+                                      banner.subtitle,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Color(0xffffd67f),
+                                        fontSize: 14,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
-              ),
-            ),
+              );
+            },
+          ),
+          if (widget.banners.length > 1)
             Positioned(
               left: 20,
               bottom: 14,
               child: Row(
-                children: List.generate(6, (index) {
-                  return Container(
-                    width: index == 2 ? 22 : 9,
+                children: List.generate(widget.banners.length, (index) {
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: index == _page ? 22 : 9,
                     height: 9,
                     margin: const EdgeInsets.only(right: 3),
                     decoration: BoxDecoration(
@@ -732,8 +881,7 @@ class _DiscountBanner extends StatelessWidget {
                 }),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -823,8 +971,8 @@ class _NetworkImage extends StatelessWidget {
     if (url == null || url!.isEmpty) {
       return const Icon(Icons.diamond_outlined, color: Color(0xffb99578));
     }
-    return Image.network(
-      url!,
+    return ShimmerNetworkImage(
+      url: url!,
       fit: fit,
       errorBuilder: (_, _, _) => const Icon(
         Icons.image_not_supported_outlined,

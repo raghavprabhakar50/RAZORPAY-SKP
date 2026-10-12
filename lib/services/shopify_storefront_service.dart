@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
+import '../models/discount_banner.dart';
 import '../models/home_catalog.dart';
 import '../models/home_slide.dart';
 
@@ -67,6 +68,100 @@ class ShopifyStorefrontService {
           priceRange {
             minVariantPrice { amount currencyCode }
           }
+        }
+      }
+    }
+  ''';
+
+  static const _discountBannersQuery = r'''
+    query DiscountBanners {
+      metaobjects(type: "discount_banner", first: 20) {
+        nodes {
+          handle
+          heading: field(key: "heading") { value }
+          subtitle: field(key: "subtitle") { value }
+          discountTitle: field(key: "discount_title") { value }
+          discountId: field(key: "discount_id") { value }
+          sortOrder: field(key: "sort_order") { value }
+          active: field(key: "active") { value }
+          showOverlay: field(key: "show_overlay") { value }
+          startsAt: field(key: "starts_at") { value }
+          endsAt: field(key: "ends_at") { value }
+          image: field(key: "image") {
+            reference {
+              ... on MediaImage {
+                image { url altText width height }
+              }
+            }
+          }
+        }
+      }
+    }
+  ''';
+
+  static const _productDetailsQuery = r'''
+    query ProductDetails($handle: String!) {
+      product(handle: $handle) {
+        id
+        handle
+        title
+        description
+        descriptionHtml
+        productType
+        shortDescription: metafield(
+          namespace: "custom"
+          key: "short_description"
+        ) { value type }
+        shortDescriptionRich: metafield(
+          namespace: "custom"
+          key: "short_description_rich"
+        ) { value type }
+        featuredImage { url altText }
+        priceRange {
+          minVariantPrice { amount currencyCode }
+        }
+        images(first: 10) {
+          nodes { url altText }
+        }
+        media(first: 20) {
+          nodes {
+            __typename
+            alt
+            mediaContentType
+            previewImage { url altText }
+            ... on MediaImage {
+              image { url altText }
+            }
+            ... on Video {
+              sources { url mimeType format height width }
+            }
+          }
+        }
+        variants(first: 100) {
+          nodes {
+            id
+            title
+            availableForSale
+            price { amount currencyCode }
+            compareAtPrice { amount currencyCode }
+            image { url altText }
+            selectedOptions { name value }
+          }
+        }
+      }
+    }
+  ''';
+
+  static const _relatedProductsQuery = r'''
+    query RelatedProducts($productId: ID!) {
+      productRecommendations(productId: $productId) {
+        id
+        handle
+        title
+        productType
+        featuredImage { url altText }
+        priceRange {
+          minVariantPrice { amount currencyCode }
         }
       }
     }
@@ -141,6 +236,56 @@ class ShopifyStorefrontService {
     );
   }
 
+  Future<List<DiscountBanner>> fetchDiscountBanners({DateTime? now}) async {
+    final payload = await _postGraphQl(_discountBannersQuery);
+    final nodes = payload['data']?['metaobjects']?['nodes'];
+    if (nodes is! List) {
+      throw const ShopifyStorefrontException(
+        'Shopify returned an invalid discount banner response.',
+      );
+    }
+
+    final currentTime = now ?? DateTime.now();
+    final banners =
+        nodes
+            .whereType<Map<String, dynamic>>()
+            .map(DiscountBanner.fromGraphQl)
+            .where((banner) => banner.isVisibleAt(currentTime))
+            .toList()
+          ..sort(
+            (first, second) => first.sortOrder.compareTo(second.sortOrder),
+          );
+    return List.unmodifiable(banners);
+  }
+
+  Future<StorefrontProduct> fetchProduct(String handle) async {
+    final payload = await _postGraphQl(
+      _productDetailsQuery,
+      variables: {'handle': handle},
+    );
+    final product = payload['data']?['product'];
+    if (product is! Map<String, dynamic>) {
+      throw const ShopifyStorefrontException(
+        'This Shopify product could not be found.',
+      );
+    }
+    return StorefrontProduct.fromGraphQl(product);
+  }
+
+  Future<List<StorefrontProduct>> fetchRelatedProducts(String productId) async {
+    final payload = await _postGraphQl(
+      _relatedProductsQuery,
+      variables: {'productId': productId},
+    );
+    final nodes = payload['data']?['productRecommendations'];
+    if (nodes is! List) return const [];
+    return List.unmodifiable(
+      nodes.whereType<Map<String, dynamic>>().map(
+        StorefrontProduct.fromGraphQl,
+      ),
+    );
+  }
+
   static bool _isPriceCollection(StorefrontCollection collection) {
     final value = '${collection.title} ${collection.handle}'.toLowerCase();
     final hasPriceDirection =
@@ -161,7 +306,10 @@ class ShopifyStorefrontService {
     return int.tryParse(number?.replaceAll(',', '') ?? '') ?? 999999999;
   }
 
-  Future<Map<String, dynamic>> _postGraphQl(String query) async {
+  Future<Map<String, dynamic>> _postGraphQl(
+    String query, {
+    Map<String, dynamic>? variables,
+  }) async {
     final response = await _client.post(
       Uri.parse(ShopifyConfig.storefrontEndpoint),
       headers: const {
@@ -169,7 +317,10 @@ class ShopifyStorefrontService {
         'X-Shopify-Storefront-Access-Token':
             ShopifyConfig.storefrontAccessToken,
       },
-      body: jsonEncode({'query': query}),
+      body: jsonEncode({
+        'query': query,
+        'variables': variables ?? const <String, dynamic>{},
+      }),
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {

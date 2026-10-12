@@ -9,14 +9,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sri_krishna_pearls_mobile/main.dart';
+import 'package:sri_krishna_pearls_mobile/models/home_catalog.dart';
 import 'package:sri_krishna_pearls_mobile/screens/home/home_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/login/login_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/login/shopify_login_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/signup/signup_screen.dart';
+import 'package:sri_krishna_pearls_mobile/screens/product/product_details_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/first_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/fourth_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/second_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/third_splash_screen.dart';
+import 'package:sri_krishna_pearls_mobile/services/shopify_storefront_service.dart';
 
 void main() {
   testWidgets('Splash screen renders branded artwork', (
@@ -101,4 +104,53 @@ void main() {
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(find.text('Welcome, Guest'), findsNothing);
   });
+
+  testWidgets('Gift card sheet opens and closes without lifecycle errors', (
+    WidgetTester tester,
+  ) async {
+    const product = StorefrontProduct(
+      id: 'gid://shopify/Product/1',
+      handle: 'pearl-set',
+      title: 'Pearl Set',
+      amount: 3999,
+      currencyCode: 'INR',
+      description: 'Pearl necklace',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductDetailsScreen(
+          product: product,
+          storefrontService: _ProductService(product),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Choose Gift Card'));
+    await tester.tap(find.text('Choose Gift Card'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Complimentary Message Card'), findsWidgets);
+    expect(find.text('Happy Birthday'), findsOneWidget);
+
+    await tester.tap(find.text('Save Selection'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ProductDetailsScreen), findsOneWidget);
+  });
+}
+
+class _ProductService extends ShopifyStorefrontService {
+  _ProductService(this.product);
+
+  final StorefrontProduct product;
+
+  @override
+  Future<StorefrontProduct> fetchProduct(String handle) async => product;
+
+  @override
+  Future<List<StorefrontProduct>> fetchRelatedProducts(
+    String productId,
+  ) async => const [];
 }
