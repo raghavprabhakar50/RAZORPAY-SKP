@@ -83,19 +83,33 @@ class ShimmerNetworkImage extends StatelessWidget {
   const ShimmerNetworkImage({
     required this.url,
     this.fit = BoxFit.cover,
+    this.maxWidth = 1200,
     this.errorBuilder,
     super.key,
   });
 
   final String url;
   final BoxFit fit;
+  final int maxWidth;
   final ImageErrorWidgetBuilder? errorBuilder;
+
+  String get _optimizedUrl {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.host.endsWith('cdn.shopify.com')) return url;
+    return uri
+        .replace(
+          queryParameters: {...uri.queryParameters, 'width': '$maxWidth'},
+        )
+        .toString();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Image.network(
-      url,
+      _optimizedUrl,
       fit: fit,
+      filterQuality: FilterQuality.medium,
+      gaplessPlayback: true,
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
         return const AppShimmer(child: ShimmerBox(borderRadius: 0));

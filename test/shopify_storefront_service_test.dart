@@ -334,6 +334,144 @@ void main() {
     expect(products.single.title, 'Related Pearl Set');
     expect(products.single.amount, 2999);
   });
+
+  test('fetchCollections paginates and includes price collections', () async {
+    var requestCount = 0;
+    final client = MockClient((request) async {
+      requestCount++;
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['query'], contains('query Collections'));
+      final variables = body['variables'] as Map<String, dynamic>;
+      final secondPage = variables['after'] == 'next-page';
+      return http.Response(
+        jsonEncode({
+          'data': {
+            'collections': {
+              'pageInfo': {
+                'hasNextPage': !secondPage,
+                'endCursor': secondPage ? null : 'next-page',
+              },
+              'nodes': secondPage
+                  ? [
+                      {
+                        'id': 'gid://shopify/Collection/2',
+                        'handle': 'akoya-pearls',
+                        'title': 'Akoya Pearls',
+                        'image': {
+                          'url': 'https://cdn.shopify.com/akoya.png',
+                          'altText': 'Akoya Pearls',
+                        },
+                      },
+                    ]
+                  : [
+                      {
+                        'id': 'gid://shopify/Collection/all',
+                        'handle': 'all-products',
+                        'title': 'all products',
+                      },
+                      {
+                        'id': 'gid://shopify/Collection/1',
+                        'handle': 'freshwater-pearls',
+                        'title': 'Freshwater Pearls',
+                      },
+                      {
+                        'id': 'gid://shopify/Collection/price',
+                        'handle': 'under-1000',
+                        'title': 'Under 1000',
+                      },
+                    ],
+            },
+          },
+        }),
+        200,
+      );
+    });
+
+    final collections = await ShopifyStorefrontService(client: client)
+        .fetchCollections();
+
+    expect(requestCount, 2);
+    expect(collections.map((collection) => collection.title), [
+      'all products',
+      'Akoya Pearls',
+      'Freshwater Pearls',
+      'Under 1000',
+    ]);
+  });
+
+  test(
+    'fetchCollectionProducts returns products for selected category',
+    () async {
+      final client = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['query'], contains('query CollectionProducts'));
+        expect(body['variables'], {
+          'handle': 'freshwater-pearls',
+          'after': null,
+        });
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'collection': {
+                'id': 'gid://shopify/Collection/1',
+                'handle': 'freshwater-pearls',
+                'title': 'Freshwater Pearls',
+                'products': {
+                  'pageInfo': {'hasNextPage': false, 'endCursor': null},
+                  'nodes': [
+                    {
+                      'id': 'gid://shopify/Product/3',
+                      'handle': 'freshwater-necklace',
+                      'title': 'Freshwater Pearl Necklace',
+                      'productType': 'Necklace',
+                      'featuredImage': {
+                        'url': 'https://cdn.shopify.com/freshwater.png',
+                        'altText': 'Freshwater necklace',
+                      },
+                      'priceRange': {
+                        'minVariantPrice': {
+                          'amount': '3499.00',
+                          'currencyCode': 'INR',
+                        },
+                      },
+                      'variants': {
+                        'nodes': [
+                          {
+                            'id': 'gid://shopify/ProductVariant/3',
+                            'title': 'Default Title',
+                            'availableForSale': true,
+                            'price': {
+                              'amount': '3499.00',
+                              'currencyCode': 'INR',
+                            },
+                            'compareAtPrice': {
+                              'amount': '3999.00',
+                              'currencyCode': 'INR',
+                            },
+                            'selectedOptions': [
+                              {'name': 'Title', 'value': 'Default Title'},
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          200,
+        );
+      });
+
+      final products = await ShopifyStorefrontService(client: client)
+          .fetchCollectionProducts('freshwater-pearls');
+
+      expect(products.single.title, 'Freshwater Pearl Necklace');
+      expect(products.single.amount, 3499);
+      expect(products.single.compareAtAmount, 3999);
+    },
+  );
 }
 
 Map<String, dynamic> _slideNode({

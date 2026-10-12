@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import '../../models/discount_banner.dart';
 import '../../models/home_catalog.dart';
 import '../../models/home_slide.dart';
-import '../../widgets/app_shimmer.dart';
-import '../product/product_details_screen.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../widgets/app_shimmer.dart';
+import '../../widgets/storefront_bottom_navigation.dart';
+import '../cart/cart_screen.dart';
+import '../category/categories_screen.dart';
+import '../product/product_details_screen.dart';
+import '../wishlist/wishlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({this.guest = false, this.storefrontService, super.key});
@@ -35,26 +39,23 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchController.addListener(_refreshProductFilter);
   }
 
-  Future<_HomeData> _loadHome() async {
-    final results = await Future.wait<Object>([
-      _storefrontService.fetchHomeSlides(),
-      _storefrontService.fetchHomeCatalog(),
-      _storefrontService.fetchDiscountBanners(),
-    ]);
-    final slides = results[0] as List<HomeSlide>;
-    final catalog = results[1] as HomeCatalogData;
-    final discountBanners = results[2] as List<DiscountBanner>;
+  Future<_HomeData> _loadHome({bool forceRefresh = false}) async {
+    final content = await _storefrontService.fetchHomeContent(
+      forceRefresh: forceRefresh,
+    );
+    unawaited(_storefrontService.fetchCollections(forceRefresh: forceRefresh));
+    final catalog = content.catalog;
     return _HomeData(
-      slides: slides,
+      slides: content.slides,
       collections: catalog.collections,
       products: catalog.products,
       priceCollections: catalog.priceCollections,
-      discountBanners: discountBanners,
+      discountBanners: content.discountBanners,
     );
   }
 
   Future<void> _reload() async {
-    final nextLoad = _loadHome();
+    final nextLoad = _loadHome(forceRefresh: true);
     setState(() {
       _homeData = nextLoad;
     });
@@ -80,6 +81,59 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(target)));
+  }
+
+  void _openCategories() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CategoriesScreen(storefrontService: _storefrontService),
+      ),
+    );
+  }
+
+  void _openWishlist() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WishlistScreen(storefrontService: _storefrontService),
+      ),
+    );
+  }
+
+  void _openCart() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CartScreen(storefrontService: _storefrontService),
+      ),
+    );
+  }
+
+  void _openCollection(StorefrontCollection collection) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CollectionProductsScreen(
+          collection: collection,
+          storefrontService: _storefrontService,
+        ),
+      ),
+    );
+  }
+
+  void _openSlideCollection(HomeSlide slide) {
+    final handle = slide.collectionHandle?.trim();
+    if (handle == null || handle.isEmpty) {
+      _openCategories();
+      return;
+    }
+
+    _openCollection(
+      StorefrontCollection(
+        id: slide.collectionId ?? '',
+        handle: handle,
+        title: slide.collectionTitle?.trim().isNotEmpty == true
+            ? slide.collectionTitle!.trim()
+            : 'Products',
+      ),
+    );
   }
 
   @override
@@ -136,9 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (data.slides.isNotEmpty)
                             _HeroCarousel(
                               slides: data.slides,
-                              onOpen: (slide) => _showTarget(
-                                slide.collectionTitle ?? 'Collection',
-                              ),
+                              onOpen: _openSlideCollection,
                             ),
                         ],
                       ),
@@ -157,12 +209,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       _SectionHeader(
                         title: 'Categories',
-                        onSeeAll: () => _showTarget('All categories'),
+                        onSeeAll: _openCategories,
                       ),
                       const SizedBox(height: 9),
                       _CategoryList(
                         collections: data.collections,
-                        onTap: (collection) => _showTarget(collection.title),
+                        onAllTap: _openCategories,
+                        onTap: _openCollection,
                       ),
                       if (data.priceCollections.isNotEmpty) ...[
                         const SizedBox(height: 24),
@@ -173,12 +226,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           selected: _selectedPriceCollection,
                           onSelected: (collection) {
                             setState(() {
-                              _selectedPriceCollection =
-                                  _selectedPriceCollection == collection
-                                  ? null
-                                  : collection;
+                              _selectedPriceCollection = collection;
                             });
-                            _showTarget(collection.title);
+                            _openCollection(collection);
                           },
                         ),
                       ],
@@ -227,7 +277,12 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
-      bottomNavigationBar: const _HomeNavigationBar(),
+      bottomNavigationBar: StorefrontBottomNavigation(
+        selectedIndex: 0,
+        onCategories: _openCategories,
+        onWishlist: _openWishlist,
+        onCart: _openCart,
+      ),
     );
   }
 }
@@ -623,9 +678,14 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _CategoryList extends StatelessWidget {
-  const _CategoryList({required this.collections, required this.onTap});
+  const _CategoryList({
+    required this.collections,
+    required this.onAllTap,
+    required this.onTap,
+  });
 
   final List<StorefrontCollection> collections;
+  final VoidCallback onAllTap;
   final ValueChanged<StorefrontCollection> onTap;
 
   @override
@@ -638,20 +698,24 @@ class _CategoryList extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: 13),
         itemBuilder: (context, index) {
           if (index == 0) {
-            return Container(
-              width: 89,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xfff3ca7d),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: const Text(
-                'All',
-                style: TextStyle(
-                  color: Color(0xff7d4d39),
-                  fontFamily: 'Fraunces',
-                  fontSize: 27,
-                  fontWeight: FontWeight.w600,
+            return InkWell(
+              onTap: onAllTap,
+              borderRadius: BorderRadius.circular(9),
+              child: Container(
+                width: 89,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xfff3ca7d),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Text(
+                  'All',
+                  style: TextStyle(
+                    color: Color(0xff7d4d39),
+                    fontFamily: 'Fraunces',
+                    fontSize: 27,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             );
@@ -1016,72 +1080,6 @@ class _HomeError extends StatelessWidget {
           OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
-    );
-  }
-}
-
-class _HomeNavigationBar extends StatelessWidget {
-  const _HomeNavigationBar();
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      elevation: 12,
-      shadowColor: const Color(0x18000000),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 79,
-          child: Row(
-            children: const [
-              Expanded(child: _HomeNavItem.home()),
-              Expanded(child: _HomeNavItem(icon: Icons.grid_view_rounded)),
-              Expanded(child: _HomeNavItem(icon: Icons.favorite_border)),
-              Expanded(child: _HomeNavItem(icon: Icons.shopping_cart_outlined)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HomeNavItem extends StatelessWidget {
-  const _HomeNavItem({required this.icon}) : selected = false;
-
-  const _HomeNavItem.home() : icon = Icons.home_rounded, selected = true;
-
-  final IconData icon;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? const Color(0xffa66042) : const Color(0xff554f49);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        if (selected)
-          Container(
-            width: 25,
-            height: 25,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: const Icon(
-              Icons.home_rounded,
-              color: Colors.white,
-              size: 17,
-            ),
-          )
-        else
-          Icon(icon, color: color, size: 29),
-        if (selected) ...[
-          const SizedBox(height: 4),
-          Text('Home', style: TextStyle(color: color, fontSize: 13)),
-        ],
-      ],
     );
   }
 }

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/splash_screens/first_splash_screen.dart';
+import 'services/shopping_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +17,7 @@ void main() {
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
+  unawaited(ShoppingStore.instance.initialize());
   runApp(const MyApp());
 }
 

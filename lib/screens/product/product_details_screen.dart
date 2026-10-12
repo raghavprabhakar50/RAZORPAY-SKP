@@ -5,8 +5,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../models/home_catalog.dart';
+import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
 import '../../widgets/app_shimmer.dart';
+import '../cart/cart_screen.dart';
 
 class ProductDetailsScreen extends StatefulWidget {
   const ProductDetailsScreen({
@@ -30,7 +32,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   late final Future<List<StorefrontProduct>> _relatedProducts;
   int _selectedImage = 0;
   int _selectedVariant = 0;
-  bool _favorite = false;
   String _giftCard = 'Not Required';
   String _giftMessage = '';
 
@@ -171,6 +172,13 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                 _ProductHeader(
                   onBack: () => Navigator.of(context).pop(),
                   onShare: () => _shareProduct(product),
+                  onCart: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CartScreen(
+                        storefrontService: widget.storefrontService,
+                      ),
+                    ),
+                  ),
                 ),
                 Expanded(
                   child: SingleChildScrollView(
@@ -227,10 +235,10 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                             fallback: product.description,
                           ),
                         ],
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 18),
                         _DeliveryInfoCard(onTermsPressed: _openShippingTerms),
                         if (productOptions.isNotEmpty) ...[
-                          const SizedBox(height: 18),
+                          const SizedBox(height: 20),
                           _ProductOptionsSelector(
                             variants: product.variants,
                             selected: _selectedVariant,
@@ -241,8 +249,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                               option.value,
                             ),
                           ),
-                        ],
-                        const SizedBox(height: 21),
+                          const SizedBox(height: 21),
+                        ] else
+                          const SizedBox(height: 20),
                         _PriceRow(product: product, variant: variant),
                         const SizedBox(height: 22),
                         _GiftCardButton(
@@ -279,16 +288,40 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   ),
                 ),
                 _ProductActions(
-                  favorite: _favorite,
+                  favorite: ShoppingStore.instance.isWishlisted(product.handle),
                   available:
                       variant?.availableForSale ?? product.availableForSale,
-                  onFavorite: () => setState(() => _favorite = !_favorite),
+                  onFavorite: () {
+                    final added = ShoppingStore.instance.toggleWishlist(
+                      product,
+                    );
+                    setState(() {});
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            added
+                                ? 'Added to wishlist.'
+                                : 'Removed from wishlist.',
+                          ),
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                  },
                   onAddToCart: () {
+                    ShoppingStore.instance.addToCart(
+                      product: product,
+                      variant: variant,
+                      giftCard: _giftCard,
+                      giftMessage: _giftMessage,
+                    );
                     ScaffoldMessenger.of(context)
                       ..hideCurrentSnackBar()
                       ..showSnackBar(
                         const SnackBar(
-                          content: Text('Cart connection will be added next.'),
+                          content: Text('Added to cart.'),
+                          duration: Duration(seconds: 1),
                         ),
                       );
                   },
@@ -303,10 +336,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
 }
 
 class _ProductHeader extends StatelessWidget {
-  const _ProductHeader({required this.onBack, required this.onShare});
+  const _ProductHeader({
+    required this.onBack,
+    required this.onShare,
+    required this.onCart,
+  });
 
   final VoidCallback onBack;
   final VoidCallback onShare;
+  final VoidCallback onCart;
 
   @override
   Widget build(BuildContext context) {
@@ -318,10 +356,12 @@ class _ProductHeader extends StatelessWidget {
           const Spacer(),
           _RoundIcon(icon: Icons.share_outlined, onTap: onShare),
           const SizedBox(width: 10),
-          _RoundIcon(
-            icon: Icons.shopping_cart_outlined,
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Your cart is empty.')),
+          AnimatedBuilder(
+            animation: ShoppingStore.instance,
+            builder: (context, _) => _RoundIcon(
+              icon: Icons.shopping_cart_outlined,
+              onTap: onCart,
+              badgeCount: ShoppingStore.instance.cartCount,
             ),
           ),
         ],
@@ -331,27 +371,60 @@ class _ProductHeader extends StatelessWidget {
 }
 
 class _RoundIcon extends StatelessWidget {
-  const _RoundIcon({required this.icon, required this.onTap});
+  const _RoundIcon({
+    required this.icon,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
 
   final IconData icon;
   final VoidCallback onTap;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 3,
-      shadowColor: const Color(0x24000000),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(
-          width: 42,
-          height: 42,
-          child: Icon(icon, color: const Color(0xff554b45), size: 22),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.white,
+          shape: const CircleBorder(),
+          elevation: 3,
+          shadowColor: const Color(0x24000000),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(icon, color: const Color(0xff554b45), size: 22),
+            ),
+          ),
         ),
-      ),
+        if (badgeCount > 0)
+          Positioned(
+            right: -4,
+            top: -5,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 19, minHeight: 19),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xffa66042),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                badgeCount > 99 ? '99+' : '$badgeCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
