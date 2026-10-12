@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/home_screen_data.dart';
 import '../../models/discount_banner.dart';
 import '../../models/home_catalog.dart';
 import '../../models/home_slide.dart';
+import '../../models/storefront_predictive_search_result.dart';
 import '../../services/shopify_storefront_service.dart';
 import '../../widgets/app_shimmer.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
@@ -27,25 +29,33 @@ class _HomeScreenState extends State<HomeScreen> {
   static const _brown = Color(0xff9d6043);
 
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   late final ShopifyStorefrontService _storefrontService;
-  late Future<_HomeData> _homeData;
+  late Future<HomeScreenData> _homeData;
   StorefrontCollection? _selectedPriceCollection;
+  Timer? _searchDebounce;
+  StorefrontPredictiveSearchResult _searchResults =
+      StorefrontPredictiveSearchResult.empty;
+  String? _searchError;
+  bool _searchLoading = false;
+  int _searchRequestId = 0;
 
   @override
   void initState() {
     super.initState();
     _storefrontService = widget.storefrontService ?? ShopifyStorefrontService();
     _homeData = _loadHome();
-    _searchController.addListener(_refreshProductFilter);
+    _searchController.addListener(_onSearchChanged);
+    _searchFocusNode.addListener(_refreshProductFilter);
   }
 
-  Future<_HomeData> _loadHome({bool forceRefresh = false}) async {
+  Future<HomeScreenData> _loadHome({bool forceRefresh = false}) async {
     final content = await _storefrontService.fetchHomeContent(
       forceRefresh: forceRefresh,
     );
     unawaited(_storefrontService.fetchCollections(forceRefresh: forceRefresh));
     final catalog = content.catalog;
-    return _HomeData(
+    return HomeScreenData(
       slides: content.slides,
       collections: catalog.collections,
       products: catalog.products,
@@ -64,6 +74,44 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _refreshProductFilter() {
     if (mounted) setState(() {});
+  }
+
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    final requestId = ++_searchRequestId;
+    final query = _searchController.text.trim();
+
+    if (query.length < 2) {
+      if (!mounted) return;
+      setState(() {
+        _searchLoading = false;
+        _searchError = null;
+        _searchResults = StorefrontPredictiveSearchResult.empty;
+      });
+      return;
+    }
+
+    setState(() {
+      _searchLoading = true;
+      _searchError = null;
+    });
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        final results = await _storefrontService.predictiveSearch(query);
+        if (!mounted || requestId != _searchRequestId) return;
+        setState(() {
+          _searchResults = results;
+          _searchLoading = false;
+        });
+      } on Object {
+        if (!mounted || requestId != _searchRequestId) return;
+        setState(() {
+          _searchResults = StorefrontPredictiveSearchResult.empty;
+          _searchLoading = false;
+          _searchError = 'Search could not be loaded. Please try again.';
+        });
+      }
+    });
   }
 
   List<StorefrontProduct> _visibleProducts(List<StorefrontProduct> products) {
@@ -107,6 +155,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openProduct(StorefrontProduct product) {
+    _searchFocusNode.unfocus();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProductDetailsScreen(
+          product: product,
+          storefrontService: _storefrontService,
+        ),
+      ),
+    );
+  }
+
+  void _useSearchSuggestion(String suggestion) {
+    _searchController.value = TextEditingValue(
+      text: suggestion,
+      selection: TextSelection.collapsed(offset: suggestion.length),
+    );
+    _searchFocusNode.requestFocus();
+  }
+
   void _openCollection(StorefrontCollection collection) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -138,8 +206,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _searchController
+    _searchDebounce?.cancel();
+    _searchFocusNode
       ..removeListener(_refreshProductFilter)
+      ..dispose();
+    _searchController
+      ..removeListener(_onSearchChanged)
       ..dispose();
     super.dispose();
   }
@@ -148,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xfff6cf88),
-      body: FutureBuilder<_HomeData>(
+      body: FutureBuilder<HomeScreenData>(
         future: _homeData,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -184,10 +256,24 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           _HomeHeader(
                             controller: _searchController,
+                            focusNode: _searchFocusNode,
                             avatarUrl: avatarUrl,
+                            searchResults: _searchResults,
+                            searchLoading: _searchLoading,
+                            searchError: _searchError,
+                            showResults:
+                                _searchFocusNode.hasFocus &&
+                                _searchController.text.trim().isNotEmpty,
+                            onSuggestionTap: _useSearchSuggestion,
+                            onProductTap: _openProduct,
                           ),
-                          const SizedBox(height: 19),
-                          if (data.slides.isNotEmpty)
+                          if (!(_searchFocusNode.hasFocus &&
+                              _searchController.text.trim().isNotEmpty)) ...[
+                            const SizedBox(height: 19),
+                          ],
+                          if (data.slides.isNotEmpty &&
+                              !(_searchFocusNode.hasFocus &&
+                                  _searchController.text.trim().isNotEmpty))
                             _HeroCarousel(
                               slides: data.slides,
                               onOpen: _openSlideCollection,
@@ -259,14 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           itemBuilder: (context, index) => _ProductCard(
                             product: products[index],
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => ProductDetailsScreen(
-                                  product: products[index],
-                                  storefrontService: _storefrontService,
-                                ),
-                              ),
-                            ),
+                            onTap: () => _openProduct(products[index]),
                           ),
                         ),
                     ],
@@ -373,27 +452,28 @@ class _HomeLoadingShimmer extends StatelessWidget {
   }
 }
 
-class _HomeData {
-  const _HomeData({
-    required this.slides,
-    required this.collections,
-    required this.products,
-    required this.priceCollections,
-    required this.discountBanners,
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader({
+    required this.controller,
+    required this.focusNode,
+    required this.searchResults,
+    required this.searchLoading,
+    required this.showResults,
+    required this.onSuggestionTap,
+    required this.onProductTap,
+    this.avatarUrl,
+    this.searchError,
   });
 
-  final List<HomeSlide> slides;
-  final List<StorefrontCollection> collections;
-  final List<StorefrontProduct> products;
-  final List<StorefrontCollection> priceCollections;
-  final List<DiscountBanner> discountBanners;
-}
-
-class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({required this.controller, this.avatarUrl});
-
   final TextEditingController controller;
+  final FocusNode focusNode;
   final String? avatarUrl;
+  final StorefrontPredictiveSearchResult searchResults;
+  final bool searchLoading;
+  final bool showResults;
+  final String? searchError;
+  final ValueChanged<String> onSuggestionTap;
+  final ValueChanged<StorefrontProduct> onProductTap;
 
   @override
   Widget build(BuildContext context) {
@@ -439,27 +519,45 @@ class _HomeHeader extends StatelessWidget {
         const SizedBox(height: 18),
         TextField(
           controller: controller,
+          focusNode: focusNode,
           textInputAction: TextInputAction.search,
+          autocorrect: false,
+          enableSuggestions: true,
           decoration: InputDecoration(
             hintText: 'Search',
             hintStyle: const TextStyle(color: Color(0xffcdbdb4), fontSize: 13),
             suffixIconConstraints: const BoxConstraints(
-              minWidth: 47,
+              minWidth: 49,
               minHeight: 47,
             ),
-            suffixIcon: Container(
-              width: 43,
-              height: 43,
-              margin: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
-                color: Color(0xfff4cc82),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.search_rounded,
-                color: Color(0xff855b48),
-                size: 29,
-              ),
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (controller.text.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Clear search',
+                    onPressed: controller.clear,
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Color(0xff85766e),
+                      size: 20,
+                    ),
+                  ),
+                Container(
+                  width: 43,
+                  height: 43,
+                  margin: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: Color(0xfff4cc82),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.search_rounded,
+                    color: Color(0xff855b48),
+                    size: 29,
+                  ),
+                ),
+              ],
             ),
             filled: true,
             fillColor: Colors.white,
@@ -471,8 +569,246 @@ class _HomeHeader extends StatelessWidget {
             ),
           ),
         ),
+        if (showResults) ...[
+          const SizedBox(height: 10),
+          _PredictiveSearchPanel(
+            query: controller.text.trim(),
+            results: searchResults,
+            loading: searchLoading,
+            error: searchError,
+            onSuggestionTap: onSuggestionTap,
+            onProductTap: onProductTap,
+          ),
+        ],
       ],
     );
+  }
+}
+
+class _PredictiveSearchPanel extends StatelessWidget {
+  const _PredictiveSearchPanel({
+    required this.query,
+    required this.results,
+    required this.loading,
+    required this.onSuggestionTap,
+    required this.onProductTap,
+    this.error,
+  });
+
+  final String query;
+  final StorefrontPredictiveSearchResult results;
+  final bool loading;
+  final String? error;
+  final ValueChanged<String> onSuggestionTap;
+  final ValueChanged<StorefrontProduct> onProductTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 88),
+        padding: const EdgeInsets.fromLTRB(15, 15, 15, 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(17),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x26000000),
+              blurRadius: 16,
+              offset: Offset(0, 6),
+            ),
+          ],
+        ),
+        child: _content(context),
+      ),
+    );
+  }
+
+  Widget _content(BuildContext context) {
+    if (query.length < 2) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 15),
+        child: Text(
+          'Type at least 2 letters to search',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Color(0xff8d817b), fontSize: 13),
+        ),
+      );
+    }
+
+    if (loading) {
+      return const AppShimmer(
+        child: Column(
+          children: [
+            ShimmerBox(height: 18, borderRadius: 5),
+            SizedBox(height: 12),
+            ShimmerBox(height: 58, borderRadius: 9),
+            SizedBox(height: 8),
+            ShimmerBox(height: 58, borderRadius: 9),
+          ],
+        ),
+      );
+    }
+
+    if (error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        child: Text(
+          error!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xff9d6043), fontSize: 13),
+        ),
+      );
+    }
+
+    if (results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        child: Text(
+          'No results found for "$query"',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xff8d817b), fontSize: 13),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (results.suggestions.isNotEmpty) ...[
+          const _SearchSectionTitle('Suggestions'),
+          const SizedBox(height: 7),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: results.suggestions
+                .map(
+                  (suggestion) => ActionChip(
+                    label: Text(suggestion),
+                    onPressed: () => onSuggestionTap(suggestion),
+                    backgroundColor: const Color(0xfffff7e9),
+                    side: const BorderSide(color: Color(0xffefd9b5)),
+                    labelStyle: const TextStyle(
+                      color: Color(0xff5c463b),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )
+                .toList(growable: false),
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (results.products.isNotEmpty) ...[
+          const _SearchSectionTitle('Products'),
+          const SizedBox(height: 5),
+          for (final product in results.products)
+            _SearchProductTile(
+              product: product,
+              onTap: () => onProductTap(product),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SearchSectionTitle extends StatelessWidget {
+  const _SearchSectionTitle(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: Color(0xff8d817b),
+            fontSize: 10,
+            letterSpacing: 1.4,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Expanded(child: Divider(height: 1, color: Color(0xffeee6e1))),
+      ],
+    );
+  }
+}
+
+class _SearchProductTile extends StatelessWidget {
+  const _SearchProductTile({required this.product, required this.onTap});
+
+  final StorefrontProduct product;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 54,
+                height: 54,
+                child: _NetworkImage(url: product.imageUrl, fit: BoxFit.cover),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xff3f3029),
+                      fontSize: 13,
+                      height: 1.25,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatSearchPrice(product),
+                    style: const TextStyle(
+                      color: Color(0xffa86143),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Color(0xffb98c72),
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _formatSearchPrice(StorefrontProduct product) {
+    final amount = product.amount.round().toString();
+    return product.currencyCode == 'INR'
+        ? 'Rs $amount'
+        : '${product.currencyCode} $amount';
   }
 }
 

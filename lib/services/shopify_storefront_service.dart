@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
+import '../data/home_catalog_data.dart';
+import '../data/home_storefront_content.dart';
 import '../models/discount_banner.dart';
 import '../models/home_catalog.dart';
 import '../models/home_slide.dart';
+import '../models/storefront_predictive_search_result.dart';
 
 class ShopifyStorefrontService {
   ShopifyStorefrontService({http.Client? client})
@@ -247,6 +250,30 @@ class ShopifyStorefrontService {
     }
   ''';
 
+  static const _predictiveSearchQuery = r'''
+    query PredictiveSearch($query: String!) {
+      predictiveSearch(
+        query: $query
+        limit: 6
+        limitScope: EACH
+        types: [QUERY, PRODUCT]
+        unavailableProducts: HIDE
+      ) {
+        queries { text }
+        products {
+          id
+          handle
+          title
+          productType
+          featuredImage { url altText }
+          priceRange {
+            minVariantPrice { amount currencyCode }
+          }
+        }
+      }
+    }
+  ''';
+
   static const _collectionsQuery = r'''
     query Collections($after: String) {
       collections(first: 50, after: $after, sortKey: TITLE) {
@@ -466,6 +493,52 @@ class ShopifyStorefrontService {
     });
   }
 
+  Future<StorefrontPredictiveSearchResult> predictiveSearch(String query) {
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) {
+      return Future.value(StorefrontPredictiveSearchResult.empty);
+    }
+
+    return _cached(
+      'predictive-search:${normalizedQuery.toLowerCase()}',
+      () async {
+        final payload = await _postGraphQl(
+          _predictiveSearchQuery,
+          variables: {'query': normalizedQuery},
+        );
+        final result = payload['data']?['predictiveSearch'];
+        if (result is! Map<String, dynamic>) {
+          throw const ShopifyStorefrontException(
+            'Shopify returned an invalid search response.',
+          );
+        }
+
+        final queryNodes = result['queries'];
+        final productNodes = result['products'];
+        final suggestions = queryNodes is List
+            ? queryNodes
+                  .whereType<Map<String, dynamic>>()
+                  .map((node) => node['text']?.toString().trim() ?? '')
+                  .where((text) => text.isNotEmpty)
+                  .toSet()
+                  .toList(growable: false)
+            : const <String>[];
+        final products = productNodes is List
+            ? productNodes
+                  .whereType<Map<String, dynamic>>()
+                  .map(StorefrontProduct.fromGraphQl)
+                  .where((product) => product.handle.isNotEmpty)
+                  .toList(growable: false)
+            : const <StorefrontProduct>[];
+
+        return StorefrontPredictiveSearchResult(
+          suggestions: suggestions,
+          products: products,
+        );
+      },
+    );
+  }
+
   Future<List<StorefrontCollection>> fetchCollections({
     bool forceRefresh = false,
   }) {
@@ -682,18 +755,6 @@ class ShopifyStorefrontService {
       'Shopify returned an unreadable response.',
     );
   }
-}
-
-class HomeStorefrontContent {
-  const HomeStorefrontContent({
-    required this.slides,
-    required this.catalog,
-    required this.discountBanners,
-  });
-
-  final List<HomeSlide> slides;
-  final HomeCatalogData catalog;
-  final List<DiscountBanner> discountBanners;
 }
 
 class _StorefrontCacheEntry {

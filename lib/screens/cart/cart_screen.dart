@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../models/cart_item.dart';
 import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
 import '../../widgets/app_shimmer.dart';

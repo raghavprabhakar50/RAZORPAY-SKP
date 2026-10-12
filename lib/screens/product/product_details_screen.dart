@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../data/product_details_data.dart';
 import '../../models/home_catalog.dart';
 import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
@@ -1202,16 +1203,6 @@ class _GiftCardSheetState extends State<_GiftCardSheet> {
 class _PurchaseBenefits extends StatelessWidget {
   const _PurchaseBenefits();
 
-  static const _benefits = <({String asset, String label})>[
-    (asset: 'assets/images/7dayReturn.svg', label: '3-Days Returns'),
-    (
-      asset: 'assets/images/online-certificate-aa0b97.svg',
-      label: 'Certificate of Authenticity',
-    ),
-    (asset: 'assets/images/gift-c9bd1e.svg', label: 'Elegant Gift Box'),
-    (asset: 'assets/images/box-5e44e1.svg', label: 'Discreet Packaging'),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1233,7 +1224,7 @@ class _PurchaseBenefits extends StatelessWidget {
             return Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: _benefits
+              children: purchaseBenefits
                   .map(
                     (benefit) => Container(
                       width: width,
@@ -1306,22 +1297,6 @@ class _PurchaseBenefits extends StatelessWidget {
 class _GiftCardGrid extends StatelessWidget {
   const _GiftCardGrid({required this.selected, required this.onSelected});
 
-  static const _cards = <({String name, String? image})>[
-    (
-      name: 'Happy Birthday',
-      image: 'https://cdn.shopify.com/s/files/1/0733/1617/1914/files/happy-birthday.jpg?v=1780570860',
-    ),
-    (
-      name: 'Happy Anniversary',
-      image: 'https://cdn.shopify.com/s/files/1/0733/1617/1914/files/happy-anniversary.jpg?v=1780570860',
-    ),
-    (
-      name: 'Thank You',
-      image: 'https://cdn.shopify.com/s/files/1/0733/1617/1914/files/thank-you.jpg?v=1780570860',
-    ),
-    (name: 'Not Required', image: null),
-  ];
-
   final String selected;
   final ValueChanged<String> onSelected;
 
@@ -1330,7 +1305,7 @@ class _GiftCardGrid extends StatelessWidget {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _cards.length,
+      itemCount: giftCardOptions.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: 10,
@@ -1338,7 +1313,7 @@ class _GiftCardGrid extends StatelessWidget {
         childAspectRatio: 1.35,
       ),
       itemBuilder: (context, index) {
-        final card = _cards[index];
+        final card = giftCardOptions[index];
         final active = selected == card.name;
         return InkWell(
           onTap: () => onSelected(card.name),
@@ -1355,7 +1330,7 @@ class _GiftCardGrid extends StatelessWidget {
                 width: active ? 3 : 1,
               ),
             ),
-            child: card.image == null
+            child: card.imageUrl == null
                 ? Center(
                     child: Text(
                       card.name,
@@ -1368,7 +1343,7 @@ class _GiftCardGrid extends StatelessWidget {
                       fit: StackFit.expand,
                       children: [
                         ShimmerNetworkImage(
-                          url: card.image!,
+                          url: card.imageUrl!,
                           fit: BoxFit.cover,
                           errorBuilder: (_, _, _) => const ColoredBox(
                             color: Color(0xfff2eee9),

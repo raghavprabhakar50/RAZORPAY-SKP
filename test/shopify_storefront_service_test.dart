@@ -335,6 +335,53 @@ void main() {
     expect(products.single.amount, 2999);
   });
 
+  test('predictiveSearch returns query suggestions and products', () async {
+    final client = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['query'], contains('query PredictiveSearch'));
+      expect(body['query'], contains('types: [QUERY, PRODUCT]'));
+      expect(body['variables'], {'query': 'fancy'});
+      return http.Response(
+        jsonEncode({
+          'data': {
+            'predictiveSearch': {
+              'queries': [
+                {'text': 'fancy baroque pearl'},
+                {'text': 'fancy pearl set'},
+              ],
+              'products': [
+                {
+                  'id': 'gid://shopify/Product/9',
+                  'handle': 'fancy-baroque-pearl-set',
+                  'title': 'Fancy Baroque Pearl Set',
+                  'productType': 'Necklace',
+                  'featuredImage': {
+                    'url': 'https://cdn.shopify.com/fancy.png',
+                    'altText': 'Fancy Baroque Pearl Set',
+                  },
+                  'priceRange': {
+                    'minVariantPrice': {
+                      'amount': '4499.00',
+                      'currencyCode': 'INR',
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        }),
+        200,
+      );
+    });
+
+    final results = await ShopifyStorefrontService(client: client)
+        .predictiveSearch(' fancy ');
+
+    expect(results.suggestions, ['fancy baroque pearl', 'fancy pearl set']);
+    expect(results.products.single.title, 'Fancy Baroque Pearl Set');
+    expect(results.products.single.amount, 4499);
+  });
+
   test('fetchCollections paginates and includes price collections', () async {
     var requestCount = 0;
     final client = MockClient((request) async {

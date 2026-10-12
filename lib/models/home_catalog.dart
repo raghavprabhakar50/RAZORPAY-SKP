@@ -3,18 +3,6 @@ import 'dart:convert';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
-class HomeCatalogData {
-  const HomeCatalogData({
-    required this.collections,
-    required this.priceCollections,
-    required this.products,
-  });
-
-  final List<StorefrontCollection> collections;
-  final List<StorefrontCollection> priceCollections;
-  final List<StorefrontProduct> products;
-}
-
 class StorefrontCollection {
   const StorefrontCollection({
     required this.id,
