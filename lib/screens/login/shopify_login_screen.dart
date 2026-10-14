@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../services/account_store.dart';
 import '../../services/shopify_auth_service.dart';
 import '../home/home_screen.dart';
 import '../signup/signup_screen.dart';
 
 class ShopifyLoginScreen extends StatefulWidget {
-  const ShopifyLoginScreen({super.key});
+  const ShopifyLoginScreen({this.returnToPrevious = false, super.key});
+
+  final bool returnToPrevious;
 
   @override
   State<ShopifyLoginScreen> createState() => _ShopifyLoginScreenState();
@@ -32,6 +35,14 @@ class _ShopifyLoginScreenState extends State<ShopifyLoginScreen> {
     try {
       final success = await _authService.signIn(email: _emailController.text);
       if (!mounted || !success) return;
+      await AccountStore.instance.completeAuthentication(
+        fallbackEmail: _emailController.text,
+      );
+      if (!mounted) return;
+      if (widget.returnToPrevious) {
+        Navigator.of(context).pop(true);
+        return;
+      }
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
         (_) => false,

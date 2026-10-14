@@ -42,8 +42,17 @@ class CartItem {
     required String giftMessage,
   }) {
     final variantId = variant?.id ?? product.firstVariantId;
+    final normalizedGiftCard = _normalizeGiftCard(giftCard);
+    final normalizedGiftMessage = normalizedGiftCard == 'Not Required'
+        ? ''
+        : giftMessage.trim();
     return CartItem(
-      key: '${product.handle}::${variantId ?? 'default'}',
+      key: buildKey(
+        productHandle: product.handle,
+        variantId: variantId,
+        giftCard: normalizedGiftCard,
+        giftMessage: normalizedGiftMessage,
+      ),
       productId: product.id,
       productHandle: product.handle,
       title: product.title,
@@ -56,18 +65,29 @@ class CartItem {
       quantity: 1,
       availableForSale: variant?.availableForSale ?? product.availableForSale,
       productType: product.productType,
-      giftCard: giftCard,
-      giftMessage: giftMessage,
+      giftCard: normalizedGiftCard,
+      giftMessage: normalizedGiftMessage,
     );
   }
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
+    final productHandle = json['productHandle']?.toString() ?? '';
+    final variantId = json['variantId']?.toString();
+    final giftCard = _normalizeGiftCard(json['giftCard']?.toString() ?? '');
+    final giftMessage = giftCard == 'Not Required'
+        ? ''
+        : json['giftMessage']?.toString().trim() ?? '';
     return CartItem(
-      key: json['key']?.toString() ?? '',
+      key: buildKey(
+        productHandle: productHandle,
+        variantId: variantId,
+        giftCard: giftCard,
+        giftMessage: giftMessage,
+      ),
       productId: json['productId']?.toString() ?? '',
-      productHandle: json['productHandle']?.toString() ?? '',
+      productHandle: productHandle,
       title: json['title']?.toString() ?? '',
-      variantId: json['variantId']?.toString(),
+      variantId: variantId,
       variantTitle: json['variantTitle']?.toString(),
       imageUrl: json['imageUrl']?.toString(),
       unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
@@ -76,9 +96,30 @@ class CartItem {
       quantity: (json['quantity'] as num?)?.toInt() ?? 1,
       availableForSale: json['availableForSale'] as bool? ?? true,
       productType: json['productType']?.toString(),
-      giftCard: json['giftCard']?.toString() ?? 'Not Required',
-      giftMessage: json['giftMessage']?.toString() ?? '',
+      giftCard: giftCard,
+      giftMessage: giftMessage,
     );
+  }
+
+  static String buildKey({
+    required String productHandle,
+    required String? variantId,
+    required String giftCard,
+    required String giftMessage,
+  }) {
+    final card = _normalizeGiftCard(giftCard);
+    final message = card == 'Not Required' ? '' : giftMessage.trim();
+    return <String>[
+      productHandle,
+      variantId ?? 'default',
+      card,
+      message,
+    ].map(Uri.encodeComponent).join('::');
+  }
+
+  static String _normalizeGiftCard(String value) {
+    final card = value.trim();
+    return card.isEmpty ? 'Not Required' : card;
   }
 
   StorefrontProduct toProduct() {

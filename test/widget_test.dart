@@ -9,19 +9,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sri_krishna_pearls_mobile/main.dart';
+import 'package:sri_krishna_pearls_mobile/models/customer_profile.dart';
 import 'package:sri_krishna_pearls_mobile/models/home_catalog.dart';
+import 'package:sri_krishna_pearls_mobile/screens/cart/cart_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/home/home_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/login/login_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/login/shopify_login_screen.dart';
+import 'package:sri_krishna_pearls_mobile/screens/profile/profile_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/signup/signup_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/product/product_details_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/first_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/fourth_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/second_splash_screen.dart';
 import 'package:sri_krishna_pearls_mobile/screens/splash_screens/third_splash_screen.dart';
+import 'package:sri_krishna_pearls_mobile/services/account_store.dart';
+import 'package:sri_krishna_pearls_mobile/services/shopping_store.dart';
 import 'package:sri_krishna_pearls_mobile/services/shopify_storefront_service.dart';
 
 void main() {
+  setUp(() {
+    AccountStore.instance.debugSetAuthenticated(false);
+  });
+
   testWidgets('Splash screen renders branded artwork', (
     WidgetTester tester,
   ) async {
@@ -31,13 +40,13 @@ void main() {
     expect(find.byType(FirstSplashScreen), findsOneWidget);
     expect(find.byType(Image), findsNWidgets(3));
 
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 2500));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(SecondSplashScreen), findsOneWidget);
     expect(find.byType(Image), findsNWidgets(3));
 
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 2500));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(ThirdSplashScreen), findsOneWidget);
@@ -138,6 +147,94 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(ProductDetailsScreen), findsOneWidget);
+  });
+
+  testWidgets('restored login session opens home instead of login', (
+    WidgetTester tester,
+  ) async {
+    AccountStore.instance.debugSetAuthenticated(
+      true,
+      profile: const CustomerProfile(email: 'customer@example.com'),
+    );
+    await tester.pumpWidget(const MaterialApp(home: ThirdSplashScreen()));
+
+    await tester.tap(find.text('SKIP'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(LoginScreen), findsNothing);
+  });
+
+  testWidgets('guest checkout requires Shopify login', (
+    WidgetTester tester,
+  ) async {
+    const product = StorefrontProduct(
+      id: 'gid://shopify/Product/checkout-test',
+      handle: 'checkout-test',
+      title: 'Checkout Test Pearl Set',
+      amount: 3999,
+      currencyCode: 'INR',
+    );
+    final store = ShoppingStore.instance;
+    store.addToCart(product: product);
+    final cartKey = store.cart
+        .firstWhere((item) => item.productHandle == product.handle)
+        .key;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(storefrontService: _ProductService(product)),
+      ),
+    );
+    expect(find.text('Sign in to Checkout'), findsOneWidget);
+    await tester.tap(find.text('Sign in to Checkout'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ShopifyLoginScreen), findsOneWidget);
+    store.removeCartItem(cartKey);
+  });
+
+  testWidgets('checkout requires a complete customer profile', (
+    WidgetTester tester,
+  ) async {
+    const product = StorefrontProduct(
+      id: 'gid://shopify/Product/profile-checkout-test',
+      handle: 'profile-checkout-test',
+      title: 'Profile Checkout Test Pearl Set',
+      amount: 4999,
+      currencyCode: 'INR',
+    );
+    AccountStore.instance.debugSetAuthenticated(
+      true,
+      profile: const CustomerProfile(
+        email: 'customer@example.com',
+        firstName: 'Krishna',
+      ),
+    );
+    final store = ShoppingStore.instance;
+    store.addToCart(product: product);
+    final cartKey = store.cart
+        .firstWhere((item) => item.productHandle == product.handle)
+        .key;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(storefrontService: _ProductService(product)),
+      ),
+    );
+    expect(find.text('Check Out'), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    await tester.tap(find.text('Check Out'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Complete your profile'), findsOneWidget);
+    await tester.tap(find.text('Complete Profile'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.text('Complete Profile'), findsOneWidget);
+    store.removeCartItem(cartKey);
   });
 }
 

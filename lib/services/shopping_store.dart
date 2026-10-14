@@ -98,15 +98,7 @@ class ShoppingStore extends ChangeNotifier {
       _cart.add(next);
     } else {
       final current = _cart[index];
-      _cart[index] = current.copyWith(
-        quantity: current.quantity + 1,
-        giftCard: next.giftCard == 'Not Required'
-            ? current.giftCard
-            : next.giftCard,
-        giftMessage: next.giftMessage.trim().isEmpty
-            ? current.giftMessage
-            : next.giftMessage,
-      );
+      _cart[index] = current.copyWith(quantity: current.quantity + 1);
     }
     _commit();
   }

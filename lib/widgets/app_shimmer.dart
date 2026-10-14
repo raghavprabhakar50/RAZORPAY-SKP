@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+String optimizedShopifyImageUrl(String url, {int maxWidth = 1200}) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.host.endsWith('cdn.shopify.com')) return url;
+  return uri
+      .replace(queryParameters: {...uri.queryParameters, 'width': '$maxWidth'})
+      .toString();
+}
+
 class AppShimmer extends StatefulWidget {
   const AppShimmer({required this.child, super.key});
 
@@ -93,20 +101,10 @@ class ShimmerNetworkImage extends StatelessWidget {
   final int maxWidth;
   final ImageErrorWidgetBuilder? errorBuilder;
 
-  String get _optimizedUrl {
-    final uri = Uri.tryParse(url);
-    if (uri == null || !uri.host.endsWith('cdn.shopify.com')) return url;
-    return uri
-        .replace(
-          queryParameters: {...uri.queryParameters, 'width': '$maxWidth'},
-        )
-        .toString();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Image.network(
-      _optimizedUrl,
+      optimizedShopifyImageUrl(url, maxWidth: maxWidth),
       fit: fit,
       filterQuality: FilterQuality.medium,
       gaplessPlayback: true,

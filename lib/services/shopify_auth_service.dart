@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_appauth/flutter_appauth.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
+import '../models/customer_profile.dart';
 
 class ShopifyAuthService {
   ShopifyAuthService({
@@ -18,6 +20,41 @@ class ShopifyAuthService {
   final FlutterAppAuth _appAuth;
   final FlutterSecureStorage _secureStorage;
   final http.Client _client;
+
+  Future<bool> hasSession() async {
+    try {
+      final token = await _secureStorage.read(key: 'shopify_access_token');
+      return token != null && token.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> restoreSession() async {
+    final token = await _secureStorage.read(key: 'shopify_access_token');
+    if (token == null || token.isEmpty) return false;
+    final expiryValue = await _secureStorage.read(
+      key: 'shopify_access_token_expiry',
+    );
+    final expiry = DateTime.tryParse(expiryValue ?? '');
+    if (expiry == null ||
+        expiry.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
+      return true;
+    }
+
+    try {
+      final renewed = await _authenticate(
+        email: '',
+        signUp: false,
+        silent: true,
+      );
+      if (renewed) return true;
+    } catch (_) {
+      // Expired Shopify sessions fall back to an explicit login.
+    }
+    await _clearLocalTokens();
+    return false;
+  }
 
   Future<bool> signIn({required String email}) async {
     await _clearPreviousSession();
@@ -34,18 +71,14 @@ class ShopifyAuthService {
     await _clearPreviousSession();
     final success = await _authenticate(email: normalizedEmail, signUp: true);
     if (!success) return false;
-
-    await _updateCustomerProfile(firstName: firstName, lastName: lastName);
-    await _secureStorage.write(
-      key: 'shopify_local_phone_$normalizedEmail',
-      value: phone.trim(),
-    );
+    await updateCustomerName(firstName: firstName, lastName: lastName);
     return true;
   }
 
   Future<bool> _authenticate({
     required String email,
     required bool signUp,
+    bool silent = false,
   }) async {
     try {
       final loginHint = email.trim().toLowerCase();
@@ -58,8 +91,8 @@ class ShopifyAuthService {
             tokenEndpoint: ShopifyConfig.tokenEndpoint,
           ),
           scopes: ShopifyConfig.customerScopes,
-          promptValues: const ['login'],
-          loginHint: loginHint,
+          promptValues: [silent ? 'none' : 'login'],
+          loginHint: loginHint.isEmpty ? null : loginHint,
           additionalParameters: signUp ? const {'screen_hint': 'signup'} : null,
         ),
       );
@@ -67,81 +100,192 @@ class ShopifyAuthService {
       final accessToken = result.accessToken;
       if (accessToken == null || accessToken.isEmpty) return false;
 
-      await Future.wait([
-        _secureStorage.write(key: 'shopify_access_token', value: accessToken),
-        _secureStorage.write(
-          key: 'shopify_refresh_token',
-          value: result.refreshToken,
-        ),
-        _secureStorage.write(key: 'shopify_id_token', value: result.idToken),
-        _secureStorage.write(
-          key: 'shopify_access_token_expiry',
-          value: result.accessTokenExpirationDateTime?.toIso8601String(),
-        ),
-      ]);
+      await _saveTokens(result);
       return true;
     } on FlutterAppAuthUserCancelledException {
       return false;
     }
   }
 
-  Future<void> _updateCustomerProfile({
+  Future<CustomerProfile> fetchCustomerProfile({
+    CustomerProfile? fallback,
+  }) async {
+    final payload = await _postCustomerGraphQl(
+      query: r'''
+        query CustomerProfile {
+          customer {
+            id
+            displayName
+            firstName
+            lastName
+            imageUrl
+            emailAddress { emailAddress }
+            phoneNumber { phoneNumber }
+            defaultAddress {
+              id
+              address1
+              address2
+              city
+              zoneCode
+              countryCode
+              zip
+              phoneNumber
+            }
+          }
+        }
+      ''',
+    );
+    final customer = payload['data']?['customer'];
+    if (customer is! Map<String, dynamic>) {
+      throw StateError('Shopify did not return the customer profile.');
+    }
+    return CustomerProfile.fromGraphQl(customer, fallback: fallback);
+  }
+
+  Future<void> updateCustomerName({
     required String firstName,
     required String lastName,
   }) async {
+    final payload = await _postCustomerGraphQl(
+      query: r'''
+        mutation UpdateCustomerProfile($input: CustomerUpdateInput!) {
+          customerUpdate(input: $input) {
+            userErrors { field message }
+          }
+        }
+      ''',
+      variables: {
+        'input': {'firstName': firstName.trim(), 'lastName': lastName.trim()},
+      },
+    );
+    _throwUserErrors(payload, 'customerUpdate');
+  }
+
+  Future<void> updateCustomerAddress(CustomerProfile profile) async {
+    final hasAddressContent =
+        profile.addressId?.isNotEmpty == true ||
+        profile.phone.trim().isNotEmpty ||
+        profile.address1.trim().isNotEmpty ||
+        profile.address2.trim().isNotEmpty ||
+        profile.address3.trim().isNotEmpty ||
+        profile.city.trim().isNotEmpty ||
+        profile.zoneCode.trim().isNotEmpty ||
+        profile.zip.trim().isNotEmpty;
+    if (!hasAddressContent) return;
+
+    final address = <String, dynamic>{
+      'firstName': profile.firstName.trim(),
+      'lastName': profile.lastName.trim(),
+      'address1': profile.address1.trim(),
+      'address2': [
+        profile.address2.trim(),
+        profile.address3.trim(),
+      ].where((line) => line.isNotEmpty).join(', '),
+      'city': profile.city.trim(),
+      'zoneCode': profile.zoneCode.trim().toUpperCase(),
+      'countryCode': profile.countryCode.trim().toUpperCase(),
+      'zip': profile.zip.trim(),
+      'phoneNumber': _normalizedPhone(
+        profile.phone,
+        profile.countryCode.trim().toUpperCase(),
+      ),
+    }..removeWhere((_, value) => value is String && value.isEmpty);
+
+    if (address.isEmpty) return;
+    final hasAddress = profile.addressId?.isNotEmpty == true;
+    final payload = await _postCustomerGraphQl(
+      query: hasAddress
+          ? r'''
+              mutation UpdateCustomerAddress(
+                $addressId: ID!
+                $address: CustomerAddressInput!
+              ) {
+                customerAddressUpdate(
+                  addressId: $addressId
+                  address: $address
+                  defaultAddress: true
+                ) {
+                  customerAddress { id }
+                  userErrors { field message }
+                }
+              }
+            '''
+          : r'''
+              mutation CreateCustomerAddress($address: CustomerAddressInput!) {
+                customerAddressCreate(
+                  address: $address
+                  defaultAddress: true
+                ) {
+                  customerAddress { id }
+                  userErrors { field message }
+                }
+              }
+            ''',
+      variables: {
+        if (hasAddress) 'addressId': profile.addressId,
+        'address': address,
+      },
+    );
+    _throwUserErrors(
+      payload,
+      hasAddress ? 'customerAddressUpdate' : 'customerAddressCreate',
+    );
+  }
+
+  Future<Map<String, dynamic>> _postCustomerGraphQl({
+    required String query,
+    Map<String, dynamic> variables = const {},
+  }) async {
     final accessToken = await _secureStorage.read(key: 'shopify_access_token');
     if (accessToken == null || accessToken.isEmpty) {
-      throw StateError('Shopify did not return an access token.');
+      throw StateError('Please login to continue.');
     }
 
-    final response = await _client.post(
-      await _customerGraphQlEndpoint(),
-      headers: {
-        'Authorization': accessToken,
-        'Content-Type': 'application/json',
-        'Origin': 'https://${ShopifyConfig.storefrontDomain}',
-      },
-      body: jsonEncode({
-        'query': '''
-          mutation UpdateCustomerProfile(\$input: CustomerUpdateInput!) {
-            customerUpdate(input: \$input) {
-              userErrors { field message }
-            }
-          }
-        ''',
-        'variables': {
-          'input': {'firstName': firstName.trim(), 'lastName': lastName.trim()},
-        },
-      }),
-    );
-
+    final response = await _client
+        .post(
+          await _customerGraphQlEndpoint(),
+          headers: {
+            'Authorization': accessToken,
+            'Content-Type': 'application/json',
+            'Origin': 'https://${ShopifyConfig.storefrontDomain}',
+          },
+          body: jsonEncode({'query': query, 'variables': variables}),
+        )
+        .timeout(const Duration(seconds: 20));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-        'Shopify profile update failed (${response.statusCode}).',
+        'Shopify profile request failed (${response.statusCode}).',
       );
     }
 
     final payload = jsonDecode(response.body) as Map<String, dynamic>;
     final graphQlErrors = payload['errors'] as List<dynamic>?;
-    final userErrors =
-        payload['data']?['customerUpdate']?['userErrors'] as List<dynamic>?;
-    final errors = graphQlErrors?.isNotEmpty == true
-        ? graphQlErrors
-        : userErrors;
-    if (errors?.isNotEmpty == true) {
-      final first = errors!.first;
+    if (graphQlErrors?.isNotEmpty == true) {
+      final first = graphQlErrors!.first;
       final message = first is Map<String, dynamic>
           ? first['message']?.toString()
           : null;
-      throw StateError(message ?? 'Shopify could not update the profile.');
+      throw StateError(message ?? 'Shopify could not load the profile.');
     }
+    return payload;
+  }
+
+  void _throwUserErrors(Map<String, dynamic> payload, String mutationKey) {
+    final userErrors =
+        payload['data']?[mutationKey]?['userErrors'] as List<dynamic>?;
+    if (userErrors?.isNotEmpty != true) return;
+    final first = userErrors!.first;
+    final message = first is Map<String, dynamic>
+        ? first['message']?.toString()
+        : null;
+    throw StateError(message ?? 'Shopify could not update the profile.');
   }
 
   Future<Uri> _customerGraphQlEndpoint() async {
     try {
-      final response = await _client.get(
-        Uri.parse(ShopifyConfig.customerApiDiscoveryEndpoint),
-      );
+      final response = await _client
+          .get(Uri.parse(ShopifyConfig.customerApiDiscoveryEndpoint))
+          .timeout(const Duration(seconds: 8));
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final payload = jsonDecode(response.body) as Map<String, dynamic>;
         final endpoint = payload['graphql_api']?.toString();
@@ -177,11 +321,43 @@ class ShopifyAuthService {
       }
     }
 
+    await _clearLocalTokens();
+  }
+
+  Future<void> _saveTokens(AuthorizationTokenResponse result) async {
+    await Future.wait([
+      _secureStorage.write(
+        key: 'shopify_access_token',
+        value: result.accessToken,
+      ),
+      _secureStorage.write(
+        key: 'shopify_refresh_token',
+        value: result.refreshToken,
+      ),
+      _secureStorage.write(key: 'shopify_id_token', value: result.idToken),
+      _secureStorage.write(
+        key: 'shopify_access_token_expiry',
+        value: result.accessTokenExpirationDateTime?.toIso8601String(),
+      ),
+    ]);
+  }
+
+  Future<void> _clearLocalTokens() async {
     await Future.wait([
       _secureStorage.delete(key: 'shopify_access_token'),
       _secureStorage.delete(key: 'shopify_refresh_token'),
       _secureStorage.delete(key: 'shopify_id_token'),
       _secureStorage.delete(key: 'shopify_access_token_expiry'),
     ]);
+  }
+
+  Future<void> signOut() => _clearPreviousSession();
+
+  static String _normalizedPhone(String value, String countryCode) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || trimmed.startsWith('+')) return trimmed;
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (countryCode == 'IN' && digits.length == 10) return '+91$digits';
+    return trimmed;
   }
 }

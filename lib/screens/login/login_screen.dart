@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../services/account_store.dart';
 import '../home/home_screen.dart';
 import '../signup/signup_screen.dart';
 import 'shopify_login_screen.dart';
@@ -32,6 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _continueAsGuest() {
+    unawaited(AccountStore.instance.continueAsGuest());
     _openHome(guest: true);
   }
 

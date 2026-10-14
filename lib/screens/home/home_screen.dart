@@ -7,12 +7,19 @@ import '../../models/discount_banner.dart';
 import '../../models/home_catalog.dart';
 import '../../models/home_slide.dart';
 import '../../models/storefront_predictive_search_result.dart';
+import '../../services/account_store.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../utils/navigation.dart';
+import '../../widgets/account_avatar.dart';
+import '../../widgets/account_drawer.dart';
 import '../../widgets/app_shimmer.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
 import '../cart/cart_screen.dart';
 import '../category/categories_screen.dart';
+import '../login/login_screen.dart';
+import '../login/shopify_login_screen.dart';
 import '../product/product_details_screen.dart';
+import '../profile/profile_screen.dart';
 import '../wishlist/wishlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -28,6 +35,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _brown = Color(0xff9d6043);
 
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   late final ShopifyStorefrontService _storefrontService;
@@ -98,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
       try {
         final results = await _storefrontService.predictiveSearch(query);
+        await _precacheSearchImages(results);
         if (!mounted || requestId != _searchRequestId) return;
         setState(() {
           _searchResults = results;
@@ -112,6 +121,23 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     });
+  }
+
+  Future<void> _precacheSearchImages(
+    StorefrontPredictiveSearchResult results,
+  ) async {
+    if (!mounted) return;
+    await Future.wait(
+      results.products.map((product) async {
+        final imageUrl = product.imageUrl;
+        if (imageUrl == null || imageUrl.isEmpty) return;
+        await precacheImage(
+          NetworkImage(optimizedShopifyImageUrl(imageUrl, maxWidth: 160)),
+          context,
+          onError: (_, _) {},
+        );
+      }),
+    );
   }
 
   List<StorefrontProduct> _visibleProducts(List<StorefrontProduct> products) {
@@ -133,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openCategories() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      instantPageRoute<void>(
         builder: (_) => CategoriesScreen(storefrontService: _storefrontService),
       ),
     );
@@ -141,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openWishlist() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      instantPageRoute<void>(
         builder: (_) => WishlistScreen(storefrontService: _storefrontService),
       ),
     );
@@ -149,9 +175,52 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openCart() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      instantPageRoute<void>(
         builder: (_) => CartScreen(storefrontService: _storefrontService),
       ),
+    );
+  }
+
+  Future<bool> _ensureLogin() async {
+    if (AccountStore.instance.isAuthenticated) return true;
+    final loggedIn = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const ShopifyLoginScreen(returnToPrevious: true),
+      ),
+    );
+    return loggedIn == true && AccountStore.instance.isAuthenticated;
+  }
+
+  Future<void> _openProfile() async {
+    if (!await _ensureLogin() || !mounted) return;
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const ProfileScreen()));
+  }
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Logout?'),
+        content: const Text('You will need to login again to checkout.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await AccountStore.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (_) => false,
     );
   }
 
@@ -219,7 +288,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: const Color(0xfff6cf88),
+      drawer: AccountDrawer(
+        onHome: () {},
+        onProfile: _openProfile,
+        onWishlist: _openWishlist,
+        onCart: _openCart,
+        onLogin: _openProfile,
+        onLogout: _logout,
+      ),
       body: FutureBuilder<HomeScreenData>(
         future: _homeData,
         builder: (context, snapshot) {
@@ -231,9 +309,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           final data = snapshot.requireData;
           final products = _visibleProducts(data.products);
-          final avatarUrl = data.slides.isEmpty
-              ? null
-              : data.slides.first.imageUrl;
           return RefreshIndicator(
             color: _brown,
             onRefresh: _reload,
@@ -251,13 +326,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: SafeArea(
                     bottom: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(17, 25, 17, 18),
+                      padding: const EdgeInsets.fromLTRB(10, 31, 10, 18),
                       child: Column(
                         children: [
                           _HomeHeader(
                             controller: _searchController,
                             focusNode: _searchFocusNode,
-                            avatarUrl: avatarUrl,
                             searchResults: _searchResults,
                             searchLoading: _searchLoading,
                             searchError: _searchError,
@@ -266,14 +340,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 _searchController.text.trim().isNotEmpty,
                             onSuggestionTap: _useSearchSuggestion,
                             onProductTap: _openProduct,
+                            onMenuTap: () =>
+                                _scaffoldKey.currentState?.openDrawer(),
+                            onProfileTap: _openProfile,
                           ),
-                          if (!(_searchFocusNode.hasFocus &&
-                              _searchController.text.trim().isNotEmpty)) ...[
-                            const SizedBox(height: 19),
-                          ],
-                          if (data.slides.isNotEmpty &&
-                              !(_searchFocusNode.hasFocus &&
-                                  _searchController.text.trim().isNotEmpty))
+                          const SizedBox(height: 19),
+                          if (data.slides.isNotEmpty)
                             _HeroCarousel(
                               slides: data.slides,
                               onOpen: _openSlideCollection,
@@ -376,7 +448,7 @@ class _HomeLoadingShimmer extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(17, 25, 17, 18),
+            padding: const EdgeInsets.fromLTRB(10, 31, 10, 18),
             child: AppShimmer(
               child: Column(
                 children: [
@@ -452,7 +524,7 @@ class _HomeLoadingShimmer extends StatelessWidget {
   }
 }
 
-class _HomeHeader extends StatelessWidget {
+class _HomeHeader extends StatefulWidget {
   const _HomeHeader({
     required this.controller,
     required this.focusNode,
@@ -461,19 +533,98 @@ class _HomeHeader extends StatelessWidget {
     required this.showResults,
     required this.onSuggestionTap,
     required this.onProductTap,
-    this.avatarUrl,
+    required this.onMenuTap,
+    required this.onProfileTap,
     this.searchError,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
-  final String? avatarUrl;
   final StorefrontPredictiveSearchResult searchResults;
   final bool searchLoading;
   final bool showResults;
   final String? searchError;
   final ValueChanged<String> onSuggestionTap;
   final ValueChanged<StorefrontProduct> onProductTap;
+  final VoidCallback onMenuTap;
+  final VoidCallback onProfileTap;
+
+  @override
+  State<_HomeHeader> createState() => _HomeHeaderState();
+}
+
+class _HomeHeaderState extends State<_HomeHeader> {
+  final _searchFieldKey = GlobalKey();
+  OverlayEntry? _searchOverlay;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleOverlaySync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleOverlaySync();
+  }
+
+  void _scheduleOverlaySync() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.showResults) {
+        if (_searchOverlay == null) {
+          _searchOverlay = OverlayEntry(builder: _buildSearchOverlay);
+          Overlay.of(context).insert(_searchOverlay!);
+        } else {
+          _searchOverlay!.markNeedsBuild();
+        }
+      } else {
+        _removeSearchOverlay();
+      }
+    });
+  }
+
+  Widget _buildSearchOverlay(BuildContext context) {
+    final renderBox =
+        _searchFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    final mediaQuery = MediaQuery.of(context);
+    final fieldLeft = renderBox?.localToGlobal(Offset.zero).dx ?? 10.0;
+    final fieldBottom = renderBox == null
+        ? 150.0
+        : renderBox.localToGlobal(Offset.zero).dy + renderBox.size.height;
+    final horizontalMargin = fieldLeft.clamp(0.0, mediaQuery.size.width / 4);
+    return Positioned(
+      left: horizontalMargin,
+      right: horizontalMargin,
+      top: fieldBottom + 10,
+      bottom: mediaQuery.viewInsets.bottom,
+      child: TextFieldTapRegion(
+        child: Material(
+          type: MaterialType.transparency,
+          child: _PredictiveSearchPanel(
+            query: widget.controller.text.trim(),
+            results: widget.searchResults,
+            loading: widget.searchLoading,
+            error: widget.searchError,
+            onSuggestionTap: widget.onSuggestionTap,
+            onProductTap: widget.onProductTap,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _removeSearchOverlay() {
+    _searchOverlay?.remove();
+    _searchOverlay = null;
+  }
+
+  @override
+  void dispose() {
+    _removeSearchOverlay();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -481,105 +632,89 @@ class _HomeHeader extends StatelessWidget {
       children: [
         Row(
           children: [
-            Container(
-              width: 47,
-              height: 47,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x24000000),
-                    blurRadius: 8,
-                    offset: Offset(0, 4),
+            Material(
+              color: Colors.white,
+              shape: const CircleBorder(),
+              elevation: 4,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: widget.onMenuTap,
+                child: const SizedBox(
+                  width: 47,
+                  height: 47,
+                  child: Icon(
+                    Icons.menu_rounded,
+                    size: 31,
+                    color: Color(0xff514a45),
                   ),
-                ],
-              ),
-              child: const Icon(
-                Icons.menu_rounded,
-                size: 31,
-                color: Color(0xff514a45),
+                ),
               ),
             ),
             const Spacer(),
-            Container(
-              width: 47,
-              height: 47,
-              padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: ClipOval(
-                child: _NetworkImage(url: avatarUrl, fit: BoxFit.cover),
-              ),
-            ),
+            AccountAvatar(radius: 23.5, onTap: widget.onProfileTap),
           ],
         ),
         const SizedBox(height: 18),
-        TextField(
-          controller: controller,
-          focusNode: focusNode,
-          textInputAction: TextInputAction.search,
-          autocorrect: false,
-          enableSuggestions: true,
-          decoration: InputDecoration(
-            hintText: 'Search',
-            hintStyle: const TextStyle(color: Color(0xffcdbdb4), fontSize: 13),
-            suffixIconConstraints: const BoxConstraints(
-              minWidth: 49,
-              minHeight: 47,
-            ),
-            suffixIcon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (controller.text.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Clear search',
-                    onPressed: controller.clear,
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      color: Color(0xff85766e),
-                      size: 20,
+        SizedBox(
+          key: _searchFieldKey,
+          width: double.infinity,
+          child: TextField(
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            textInputAction: TextInputAction.search,
+            autocorrect: false,
+            enableSuggestions: true,
+            onTapOutside: (_) => widget.focusNode.unfocus(),
+            decoration: InputDecoration(
+              hintText: 'Search',
+              hintStyle: const TextStyle(
+                color: Color(0xffcdbdb4),
+                fontSize: 13,
+              ),
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 49,
+                minHeight: 47,
+              ),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.controller.text.isNotEmpty)
+                    IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: widget.controller.clear,
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Color(0xff85766e),
+                        size: 20,
+                      ),
+                    ),
+                  Container(
+                    width: 43,
+                    height: 43,
+                    margin: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Color(0xfff4cc82),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.search_rounded,
+                      color: Color(0xff855b48),
+                      size: 29,
                     ),
                   ),
-                Container(
-                  width: 43,
-                  height: 43,
-                  margin: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Color(0xfff4cc82),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.search_rounded,
-                    color: Color(0xff855b48),
-                    size: 29,
-                  ),
-                ),
-              ],
-            ),
-            filled: true,
-            fillColor: Colors.white,
-            isDense: true,
-            contentPadding: const EdgeInsets.fromLTRB(15, 15, 5, 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(24),
-              borderSide: BorderSide.none,
+                ],
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+              contentPadding: const EdgeInsets.fromLTRB(15, 15, 5, 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide.none,
+              ),
             ),
           ),
         ),
-        if (showResults) ...[
-          const SizedBox(height: 10),
-          _PredictiveSearchPanel(
-            query: controller.text.trim(),
-            results: searchResults,
-            loading: searchLoading,
-            error: searchError,
-            onSuggestionTap: onSuggestionTap,
-            onProductTap: onProductTap,
-          ),
-        ],
       ],
     );
   }
@@ -604,26 +739,21 @@ class _PredictiveSearchPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      child: Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 88),
-        padding: const EdgeInsets.fromLTRB(15, 15, 15, 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(17),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x26000000),
-              blurRadius: 16,
-              offset: Offset(0, 6),
-            ),
-          ],
-        ),
-        child: _content(context),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(15, 15, 15, 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
+      child: SingleChildScrollView(child: _content(context)),
     );
   }
 
@@ -754,18 +884,22 @@ class _SearchProductTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 7),
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: SizedBox(
-                width: 54,
-                height: 54,
-                child: _NetworkImage(url: product.imageUrl, fit: BoxFit.cover),
+                width: 50,
+                height: 50,
+                child: _NetworkImage(
+                  url: product.imageUrl,
+                  fit: BoxFit.cover,
+                  maxWidth: 160,
+                ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1361,10 +1495,15 @@ class _ProductCard extends StatelessWidget {
 }
 
 class _NetworkImage extends StatelessWidget {
-  const _NetworkImage({required this.url, required this.fit});
+  const _NetworkImage({
+    required this.url,
+    required this.fit,
+    this.maxWidth = 1200,
+  });
 
   final String? url;
   final BoxFit fit;
+  final int maxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -1374,6 +1513,7 @@ class _NetworkImage extends StatelessWidget {
     return ShimmerNetworkImage(
       url: url!,
       fit: fit,
+      maxWidth: maxWidth,
       errorBuilder: (_, _, _) => const Icon(
         Icons.image_not_supported_outlined,
         color: Color(0xffb99578),

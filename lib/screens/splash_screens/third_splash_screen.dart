@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../services/account_store.dart';
+import '../home/home_screen.dart';
 import '../login/login_screen.dart';
 import 'fourth_splash_screen.dart';
 
@@ -34,16 +36,18 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
           curve: Curves.easeOutCubic,
         );
       } else {
-        _openLogin();
+        _openDestination();
       }
     });
   }
 
-  void _openLogin() {
+  void _openDestination() {
     _autoAdvanceTimer?.cancel();
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
-    );
+    final destination = AccountStore.instance.isAuthenticated
+        ? const HomeScreen()
+        : const LoginScreen();
+    Navigator.of(context)
+        .pushReplacement(MaterialPageRoute<void>(builder: (_) => destination));
   }
 
   void _handleNext() {
@@ -56,7 +60,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
       );
       return;
     }
-    _openLogin();
+    _openDestination();
   }
 
   @override
@@ -69,7 +73,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
   @override
   Widget build(BuildContext context) {
     return OnboardingSplashLayout(
-      onSkip: _openLogin,
+      onSkip: _openDestination,
       onNext: _handleNext,
       content: PageView(
         controller: _pageController,

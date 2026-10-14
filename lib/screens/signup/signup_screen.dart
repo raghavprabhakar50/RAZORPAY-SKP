@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/account_store.dart';
 import '../../services/shopify_auth_service.dart';
 import '../home/home_screen.dart';
 
@@ -43,6 +44,13 @@ class _SignupScreenState extends State<SignupScreen> {
       );
       if (!mounted) return;
       if (success) {
+        await AccountStore.instance.completeAuthentication(
+          fallbackEmail: _emailController.text,
+          firstName: _firstNameController.text,
+          lastName: _lastNameController.text,
+          phone: _phoneController.text,
+        );
+        if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
           (_) => false,

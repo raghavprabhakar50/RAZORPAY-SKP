@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/home_catalog.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../utils/navigation.dart';
 import '../../widgets/app_shimmer.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
 import '../cart/cart_screen.dart';
@@ -128,13 +129,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         selectedIndex: 1,
         onHome: () => Navigator.of(context).popUntil((route) => route.isFirst),
         onWishlist: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) =>
                 WishlistScreen(storefrontService: widget.storefrontService),
           ),
         ),
         onCart: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) =>
                 CartScreen(storefrontService: widget.storefrontService),
           ),

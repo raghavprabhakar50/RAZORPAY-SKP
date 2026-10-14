@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/splash_screens/first_splash_screen.dart';
+import 'services/account_store.dart';
 import 'services/shopping_store.dart';
 
 void main() {
@@ -17,6 +18,7 @@ void main() {
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
+  unawaited(AccountStore.instance.initialize());
   unawaited(ShoppingStore.instance.initialize());
   runApp(const MyApp());
 }

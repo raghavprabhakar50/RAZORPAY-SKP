@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../utils/navigation.dart';
 import '../../widgets/app_shimmer.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
 import '../cart/cart_screen.dart';
@@ -185,13 +186,13 @@ class WishlistScreen extends StatelessWidget {
         selectedIndex: 2,
         onHome: () => _goHome(context),
         onCategories: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) =>
                 CategoriesScreen(storefrontService: storefrontService),
           ),
         ),
         onCart: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) => CartScreen(storefrontService: storefrontService),
           ),
         ),

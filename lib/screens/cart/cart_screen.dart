@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../models/cart_item.dart';
+import '../../services/account_store.dart';
 import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../utils/navigation.dart';
 import '../../widgets/app_shimmer.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
 import '../category/categories_screen.dart';
+import '../login/shopify_login_screen.dart';
+import '../profile/profile_screen.dart';
 import '../wishlist/wishlist_screen.dart';
 
 const _cartBrown = Color(0xffa66042);
@@ -18,6 +22,62 @@ class CartScreen extends StatelessWidget {
 
   void _goHome(BuildContext context) {
     Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  Future<void> _checkout(BuildContext context) async {
+    if (!AccountStore.instance.isAuthenticated) {
+      final loggedIn = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const ShopifyLoginScreen(returnToPrevious: true),
+        ),
+      );
+      if (loggedIn != true || !context.mounted) return;
+    }
+    final profile = AccountStore.instance.profile;
+    if (profile == null || !profile.isCheckoutReady) {
+      final completeProfile = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(
+            Icons.person_pin_circle_outlined,
+            color: _cartBrown,
+            size: 34,
+          ),
+          title: const Text('Complete your profile'),
+          content: const Text(
+            'Please add your name, phone number and complete delivery address before checkout.',
+            textAlign: TextAlign.center,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: _cartBrown),
+              child: const Text('Complete Profile'),
+            ),
+          ],
+        ),
+      );
+      if (completeProfile != true || !context.mounted) return;
+      final completed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => const ProfileScreen(requireCompletion: true),
+        ),
+      );
+      if (completed != true || !context.mounted) return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Checkout will connect to Razorpay Magic Checkout through the middleware.',
+          ),
+        ),
+      );
   }
 
   @override
@@ -56,30 +116,36 @@ class CartScreen extends StatelessWidget {
               const SizedBox(height: 16),
               SizedBox(
                 height: 52,
-                child: FilledButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context)
-                      ..hideCurrentSnackBar()
-                      ..showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Checkout will connect to Razorpay Magic Checkout through the middleware.',
+                child: AnimatedBuilder(
+                  animation: AccountStore.instance,
+                  builder: (context, _) => FilledButton(
+                    onPressed: () => _checkout(context),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _cartBrown,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.lock_outline_rounded,
+                          color: Colors.white,
+                          size: 19,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          AccountStore.instance.isAuthenticated
+                              ? 'Check Out'
+                              : 'Sign in to Checkout',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      );
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _cartBrown,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                  ),
-                  child: const Text(
-                    'Check Out',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                      ],
                     ),
                   ),
                 ),
@@ -92,13 +158,13 @@ class CartScreen extends StatelessWidget {
         selectedIndex: 3,
         onHome: () => _goHome(context),
         onCategories: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) =>
                 CategoriesScreen(storefrontService: storefrontService),
           ),
         ),
         onWishlist: () => Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
+          instantPageRoute<void>(
             builder: (_) =>
                 WishlistScreen(storefrontService: storefrontService),
           ),

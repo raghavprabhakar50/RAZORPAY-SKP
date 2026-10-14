@@ -23,7 +23,7 @@ class _FirstSplashScreenState extends State<FirstSplashScreen>
       vsync: this,
       duration: const Duration(seconds: 14),
     )..repeat();
-    _transitionTimer = Timer(const Duration(seconds: 4), _openNext);
+    _transitionTimer = Timer(const Duration(milliseconds: 2500), _openNext);
   }
 
   void _openNext() {
@@ -155,7 +155,7 @@ class _FirstLoadingLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 68),
-      duration: const Duration(seconds: 4),
+      duration: const Duration(milliseconds: 2500),
       curve: Curves.easeInOutCubic,
       builder: (_, width, _) => Container(
         width: width,
