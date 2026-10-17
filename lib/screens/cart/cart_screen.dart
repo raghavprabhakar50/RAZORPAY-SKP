@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/cart_item.dart';
+import '../../models/checkout_coupon.dart';
 import '../../services/account_store.dart';
+import '../../services/middleware_checkout_service.dart';
+import '../../services/razorpay_checkout.dart';
 import '../../services/shopping_store.dart';
 import '../../services/shopify_storefront_service.dart';
+import '../../services/shopify_auth_service.dart';
 import '../../utils/navigation.dart';
 import '../../widgets/app_shimmer.dart';
+import '../../widgets/cart_coupon_offers.dart';
 import '../../widgets/storefront_bottom_navigation.dart';
 import '../category/categories_screen.dart';
 import '../login/shopify_login_screen.dart';
@@ -15,10 +21,56 @@ import '../wishlist/wishlist_screen.dart';
 const _cartBrown = Color(0xffa66042);
 const _cartText = Color(0xff574335);
 
-class CartScreen extends StatelessWidget {
-  const CartScreen({required this.storefrontService, super.key});
+class CartScreen extends StatefulWidget {
+  const CartScreen({
+    required this.storefrontService,
+    this.checkoutService,
+    this.paymentGateway,
+    super.key,
+  });
 
   final ShopifyStorefrontService storefrontService;
+  final MiddlewareCheckoutService? checkoutService;
+  final RazorpayCheckout? paymentGateway;
+  @override
+  State<CartScreen> createState() => _CartScreenState();
+}
+
+class _CartScreenState extends State<CartScreen> {
+  late final _service = widget.checkoutService ?? MiddlewareCheckoutService();
+  ShopifyStorefrontService get storefrontService => widget.storefrontService;
+  bool _working = false;
+  String _progress = 'Opening checkout…';
+  String? _notice;
+  final _orderInstructions = TextEditingController();
+  String? _selectedCoupon;
+  late final _coupons = storefrontService.fetchCheckoutCoupons();
+
+  Future<void> _begin(BuildContext context) async {
+    if (_working) return;
+    setState(() {
+      _working = true;
+      _notice = null;
+    });
+    try {
+      await _checkout(context);
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _notice = error is StateError ? error.message.toString() : 'Unable to complete checkout. Tap Check Out to recover your saved payment before retrying.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _orderInstructions.dispose();
+    if (widget.checkoutService == null) _service.close();
+    super.dispose();
+  }
 
   void _goHome(BuildContext context) {
     Navigator.of(context).popUntil((route) => route.isFirst);
@@ -69,15 +121,40 @@ class CartScreen extends StatelessWidget {
       );
       if (completed != true || !context.mounted) return;
     }
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Checkout will connect to Razorpay Magic Checkout through the middleware.',
-          ),
-        ),
+    if (!context.mounted) return;
+    final checkoutProfile = AccountStore.instance.profile;
+    if (checkoutProfile == null ||
+        !checkoutProfile.isCheckoutReady ||
+        ShoppingStore.instance.cart.isEmpty) {
+      return;
+    }
+    await _service.prepareHostedCheckout(checkoutProfile.id);
+    if (!mounted) return;
+    setState(() => _progress = 'Opening Shopify checkout...');
+    final items = List<CartItem>.unmodifiable(ShoppingStore.instance.cart);
+    final token = await ShopifyAuthService().checkoutAccessToken();
+    final checkout = await storefrontService.createWebCheckout(
+      items,
+      customerAccessToken: token,
+      orderNote: _orderInstructions.text,
+      discountCode: _selectedCoupon ?? '',
+    );
+    if (!mounted ||
+        AccountStore.instance.profile?.id != checkoutProfile.id ||
+        !AccountStore.instance.isAuthenticated) {
+      return;
+    }
+    final opened = await launchUrl(checkout, mode: LaunchMode.inAppBrowserView);
+    if (!opened) {
+      throw StateError('Unable to open Shopify checkout. Please try again.');
+    }
+    // Opening/closing a browser is not payment proof. Keep the cart intact;
+    // Shopify owns payment confirmation and existing order/webhook sync.
+    if (mounted) {
+      setState(
+        () => _notice = 'Shopify checkout opened. Check your orders to confirm payment before paying again.',
       );
+    }
   }
 
   @override
@@ -103,7 +180,10 @@ class CartScreen extends StatelessWidget {
         centerTitle: true,
       ),
       body: AnimatedBuilder(
-        animation: ShoppingStore.instance,
+        animation: Listenable.merge([
+          ShoppingStore.instance,
+          AccountStore.instance,
+        ]),
         builder: (context, _) {
           final store = ShoppingStore.instance;
           if (store.cart.isEmpty) return const _EmptyCart();
@@ -114,61 +194,114 @@ class CartScreen extends StatelessWidget {
               const SizedBox(height: 16),
               _CartSummary(store: store),
               const SizedBox(height: 16),
-              SizedBox(
-                height: 52,
-                child: AnimatedBuilder(
-                  animation: AccountStore.instance,
-                  builder: (context, _) => FilledButton(
-                    onPressed: () => _checkout(context),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _cartBrown,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.lock_outline_rounded,
-                          color: Colors.white,
-                          size: 19,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          AccountStore.instance.isAuthenticated
-                              ? 'Check Out'
-                              : 'Sign in to Checkout',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              if (AccountStore.instance.isAuthenticated) ...[
+                FutureBuilder<List<CheckoutCoupon>>(
+                  future: _coupons,
+                  builder: (context, snapshot) {
+                    final coupons =
+                        snapshot.data ?? CheckoutCoupon.publicFallback;
+                    return CartCouponOffers(
+                      coupons: coupons,
+                      selectedCode: _selectedCoupon,
+                      enabled: !_working,
+                      onChanged: (code) =>
+                          setState(() => _selectedCoupon = code),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+              TextField(
+                controller: _orderInstructions,
+                enabled: !_working,
+                minLines: 3,
+                maxLines: 5,
+                maxLength: 1000,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Order special instructions',
+                  hintText: 'Add delivery or order instructions (optional)',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 16),
             ],
           );
         },
       ),
-      bottomNavigationBar: StorefrontBottomNavigation(
-        selectedIndex: 3,
-        onHome: () => _goHome(context),
-        onCategories: () => Navigator.of(context).pushReplacement(
-          instantPageRoute<void>(
-            builder: (_) =>
-                CategoriesScreen(storefrontService: storefrontService),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedBuilder(
+            animation: Listenable.merge([
+              ShoppingStore.instance,
+              AccountStore.instance,
+            ]),
+            builder: (context, _) => ShoppingStore.instance.cart.isEmpty
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 52,
+                          child: FilledButton(
+                            onPressed: _working ? null : () => _begin(context),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _cartBrown,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                if (!AccountStore.instance.isAuthenticated) ...[
+                                  const Icon(
+                                    Icons.lock_outline_rounded,
+                                    size: 19,
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    _working
+                                        ? _progress
+                                        : AccountStore.instance.isAuthenticated
+                                        ? 'Check Out'
+                                        : 'Sign in to Checkout',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_notice != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(_notice!, textAlign: TextAlign.center),
+                          ),
+                      ],
+                    ),
+                  ),
           ),
-        ),
-        onWishlist: () => Navigator.of(context).pushReplacement(
-          instantPageRoute<void>(
-            builder: (_) =>
-                WishlistScreen(storefrontService: storefrontService),
+          StorefrontBottomNavigation(
+            selectedIndex: 3,
+            onHome: () => _goHome(context),
+            onCategories: () => Navigator.of(context).pushReplacement(
+              instantPageRoute<void>(
+                builder: (_) =>
+                    CategoriesScreen(storefrontService: storefrontService),
+              ),
+            ),
+            onWishlist: () => Navigator.of(context).pushReplacement(
+              instantPageRoute<void>(
+                builder: (_) =>
+                    WishlistScreen(storefrontService: storefrontService),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

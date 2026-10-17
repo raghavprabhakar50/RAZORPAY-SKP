@@ -42,6 +42,8 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 2500));
     await tester.pump(const Duration(milliseconds: 400));
+    // Startup now waits for session restoration before choosing onboarding.
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(SecondSplashScreen), findsOneWidget);
     expect(find.byType(Image), findsNWidgets(3));
@@ -166,6 +168,23 @@ void main() {
     expect(find.byType(LoginScreen), findsNothing);
   });
 
+  testWidgets('signed-in startup skips onboarding screens automatically', (
+    tester,
+  ) async {
+    AccountStore.instance.debugSetAuthenticated(
+      true,
+      profile: const CustomerProfile(email: 'customer@example.com'),
+    );
+    await tester.pumpWidget(const MaterialApp(home: FirstSplashScreen()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(SecondSplashScreen), findsNothing);
+    expect(find.byType(ThirdSplashScreen), findsNothing);
+    expect(find.byType(LoginScreen), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('guest checkout requires Shopify login', (
     WidgetTester tester,
   ) async {
@@ -188,6 +207,9 @@ void main() {
       ),
     );
     expect(find.text('Sign in to Checkout'), findsOneWidget);
+    expect(find.text('COUPON OFFER'), findsNothing);
+    expect(find.textContaining('View available'), findsNothing);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
     await tester.tap(find.text('Sign in to Checkout'));
     await tester.pumpAndSettle();
 
@@ -224,7 +246,8 @@ void main() {
       ),
     );
     expect(find.text('Check Out'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    expect(find.text('COUPON OFFER'), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline_rounded), findsNothing);
     await tester.tap(find.text('Check Out'));
     await tester.pumpAndSettle();
 

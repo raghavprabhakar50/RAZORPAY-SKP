@@ -28,7 +28,7 @@ class AccountStore extends ChangeNotifier {
   void debugSetAuthenticated(bool value, {CustomerProfile? profile}) {
     _authenticated = value;
     _profile = value ? profile : null;
-    _initializing = Future<void>.value();
+    _initializing = SynchronousFuture<void>(null);
     notifyListeners();
   }
 
@@ -39,6 +39,7 @@ class AccountStore extends ChangeNotifier {
       _profile = await _readCachedProfile();
       _authenticated = await _authService.restoreSession();
       if (_authenticated) {
+        notifyListeners();
         await refreshProfile(silent: true);
       } else {
         _profile = null;

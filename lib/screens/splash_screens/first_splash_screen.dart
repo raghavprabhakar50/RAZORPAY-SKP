@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../services/account_store.dart';
+import '../home/home_screen.dart';
+
 import 'second_splash_screen.dart';
 
 class FirstSplashScreen extends StatefulWidget {
@@ -14,6 +17,7 @@ class FirstSplashScreen extends StatefulWidget {
 class _FirstSplashScreenState extends State<FirstSplashScreen>
     with SingleTickerProviderStateMixin {
   Timer? _transitionTimer;
+  bool _navigated = false;
   late final AnimationController _mandalaController;
 
   @override
@@ -24,10 +28,35 @@ class _FirstSplashScreenState extends State<FirstSplashScreen>
       duration: const Duration(seconds: 14),
     )..repeat();
     _transitionTimer = Timer(const Duration(milliseconds: 2500), _openNext);
+    AccountStore.instance.addListener(_sessionReady);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sessionReady());
+    unawaited(
+      AccountStore.instance.initialize().then((_) {
+        if (!mounted) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _sessionReady());
+      }),
+    );
   }
 
-  void _openNext() {
-    if (!mounted) return;
+  void _sessionReady() {
+    if (!mounted || _navigated || !AccountStore.instance.isAuthenticated) {
+      return;
+    }
+    _navigated = true;
+    _transitionTimer?.cancel();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+    );
+  }
+
+  void _openNext() async {
+    await AccountStore.instance.initialize();
+    if (!mounted || _navigated) return;
+    if (AccountStore.instance.isAuthenticated) {
+      _sessionReady();
+      return;
+    }
+    _navigated = true;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(
         transitionDuration: const Duration(milliseconds: 350),
@@ -41,6 +70,7 @@ class _FirstSplashScreenState extends State<FirstSplashScreen>
   @override
   void dispose() {
     _transitionTimer?.cancel();
+    AccountStore.instance.removeListener(_sessionReady);
     _mandalaController.dispose();
     super.dispose();
   }

@@ -43,7 +43,7 @@ class ShopifyConfig {
 
   static const middlewareBaseUrl = String.fromEnvironment(
     'SKP_MIDDLEWARE_BASE_URL',
-    defaultValue: 'http://10.0.2.2/qatar/index.php/api/v1',
+    defaultValue: 'https://shri-middleware.ekarigar.com',
   );
 
   static const mobileApiToken = String.fromEnvironment('SKP_MOBILE_API_TOKEN');

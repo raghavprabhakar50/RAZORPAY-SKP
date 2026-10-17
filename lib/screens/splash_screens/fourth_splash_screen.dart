@@ -187,19 +187,10 @@ class _JewelleryIllustration extends StatelessWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: ClipRect(
-        child: OverflowBox(
-          alignment: Alignment.bottomCenter,
-          minWidth: width * 1.1,
-          maxWidth: width * 1.1,
-          minHeight: height * 1.3,
-          maxHeight: height * 1.3,
-          child: Image.asset(
-            'assets/images/skp splash logo 3.jpg',
-            fit: BoxFit.cover,
-            alignment: Alignment.bottomCenter,
-          ),
-        ),
+      child: Image.asset(
+        'assets/images/old image.webp',
+        fit: BoxFit.contain,
+        semanticLabel: 'Historic jewellers to H.E.H. The Nizam',
       ),
     );
   }

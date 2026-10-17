@@ -7,19 +7,40 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/cart_item.dart';
 import '../models/home_catalog.dart';
 import '../models/wishlist_item.dart';
+import 'account_cart_state.dart';
+import 'account_store.dart';
 
 class ShoppingStore extends ChangeNotifier {
-  ShoppingStore._();
+  ShoppingStore._() {
+    AccountStore.instance.addListener(_accountChanged);
+    _selectAccount();
+  }
 
   static final ShoppingStore instance = ShoppingStore._();
   static const _storageKey = 'shopping_store_v1';
+  static const _scopedKey = 'shopping_cart_accounts_v2';
   static const _storage = FlutterSecureStorage();
 
   final Map<String, WishlistItem> _wishlist = {};
-  final List<CartItem> _cart = [];
+  final AccountCartState _cartState = AccountCartState();
+  List<CartItem> get _cart => _cartState.items;
   Future<void> _persistQueue = Future<void>.value();
   bool _changedBeforeLoad = false;
   bool _initialized = false;
+  Future<void>? _initializing;
+
+  void _selectAccount() {
+    final account = AccountStore.instance;
+    _cartState.selectAccount(
+      account.isAuthenticated ? account.profile?.id : null,
+      authenticating: account.isAuthenticated,
+    );
+  }
+
+  void _accountChanged() {
+    _selectAccount();
+    _commit(); // Scope switches hide the previous account synchronously.
+  }
 
   List<WishlistItem> get wishlist => List.unmodifiable(_wishlist.values);
   List<CartItem> get cart => List.unmodifiable(_cart);
@@ -28,7 +49,8 @@ class ShoppingStore extends ChangeNotifier {
   double get cartSubtotal =>
       _cart.fold(0, (total, item) => total + (item.unitPrice * item.quantity));
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initializing ??= _load();
+  Future<void> _load() async {
     if (_initialized) return;
     try {
       final stored = await _storage.read(key: _storageKey);
@@ -36,7 +58,6 @@ class ShoppingStore extends ChangeNotifier {
         final decoded = jsonDecode(stored);
         if (decoded is Map<String, dynamic>) {
           final wishlistData = decoded['wishlist'];
-          final cartData = decoded['cart'];
           if (wishlistData is List) {
             for (final value in wishlistData.whereType<Map>()) {
               final item = WishlistItem.fromJson(
@@ -45,19 +66,22 @@ class ShoppingStore extends ChangeNotifier {
               if (item.handle.isNotEmpty) _wishlist[item.handle] = item;
             }
           }
-          if (cartData is List) {
-            for (final value in cartData.whereType<Map>()) {
-              final item = CartItem.fromJson(Map<String, dynamic>.from(value));
-              if (item.key.isNotEmpty && item.quantity > 0) _cart.add(item);
-            }
-          }
+          // Legacy cart has no owner. Keep its original storage untouched;
+          // never assign potentially another customer's items to a new login.
         }
       }
     } catch (_) {
       // A corrupt local value should never stop the storefront from opening.
     } finally {
+      try {
+        final saved = await _storage.read(key: _scopedKey);
+        final decoded = saved == null ? null : jsonDecode(saved);
+        _cartState.restore(decoded is Map<String, dynamic> ? decoded : {});
+      } catch (_) {
+        _cartState.restore({});
+      }
       _initialized = true;
-      notifyListeners();
+      _commit();
     }
   }
 
@@ -93,13 +117,7 @@ class ShoppingStore extends ChangeNotifier {
       giftCard: giftCard,
       giftMessage: giftMessage,
     );
-    final index = _cart.indexWhere((item) => item.key == next.key);
-    if (index < 0) {
-      _cart.add(next);
-    } else {
-      final current = _cart[index];
-      _cart[index] = current.copyWith(quantity: current.quantity + 1);
-    }
+    _cartState.add(next);
     _commit();
   }
 
@@ -107,7 +125,7 @@ class ShoppingStore extends ChangeNotifier {
     final index = _cart.indexWhere((item) => item.key == key);
     if (index < 0) return;
     _changedBeforeLoad = true;
-    _cart[index] = _cart[index].copyWith(quantity: _cart[index].quantity + 1);
+    _cartState.increment(key);
     _commit();
   }
 
@@ -115,17 +133,13 @@ class ShoppingStore extends ChangeNotifier {
     final index = _cart.indexWhere((item) => item.key == key);
     if (index < 0) return;
     _changedBeforeLoad = true;
-    if (_cart[index].quantity <= 1) {
-      _cart.removeAt(index);
-    } else {
-      _cart[index] = _cart[index].copyWith(quantity: _cart[index].quantity - 1);
-    }
+    _cartState.decrement(key);
     _commit();
   }
 
   void removeCartItem(String key) {
     final previousLength = _cart.length;
-    _cart.removeWhere((item) => item.key == key);
+    _cartState.remove(key);
     if (_cart.length == previousLength) return;
     _changedBeforeLoad = true;
     _commit();
@@ -133,12 +147,27 @@ class ShoppingStore extends ChangeNotifier {
 
   void _commit() {
     notifyListeners();
+    if (!_initialized) return; // Don't overwrite disk before restore/replay.
     final payload = jsonEncode({
       'wishlist': _wishlist.values.map((item) => item.toJson()).toList(),
-      'cart': _cart.map((item) => item.toJson()).toList(),
     });
+    final carts = jsonEncode(_cartState.toJson());
     _persistQueue = _persistQueue
-        .then((_) => _storage.write(key: _storageKey, value: payload))
+        .then((_) async {
+          await _storage.write(key: _scopedKey, value: carts);
+          // Keep the unowned legacy cart recoverable, but not visible in any scope.
+          final old = await _storage.read(key: _storageKey);
+          Map<String, dynamic> legacy;
+          try {
+            legacy = old == null
+                ? {}
+                : Map<String, dynamic>.from(jsonDecode(old) as Map);
+          } catch (_) {
+            legacy = {};
+          }
+          legacy['wishlist'] = (jsonDecode(payload) as Map)['wishlist'];
+          await _storage.write(key: _storageKey, value: jsonEncode(legacy));
+        })
         .catchError((_) {});
   }
 }

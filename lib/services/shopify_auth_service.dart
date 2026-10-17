@@ -20,6 +20,17 @@ class ShopifyAuthService {
   final FlutterAppAuth _appAuth;
   final FlutterSecureStorage _secureStorage;
   final http.Client _client;
+  Future<bool>? _refreshing;
+
+  /// A customer token, never an Admin API or shared payment secret.
+  Future<String> checkoutAccessToken() async {
+    if (!await restoreSession()) throw StateError('Please sign in again.');
+    final token = await _secureStorage.read(key: 'shopify_access_token');
+    if (token == null || token.isEmpty) {
+      throw StateError('Please sign in again.');
+    }
+    return token;
+  }
 
   Future<bool> hasSession() async {
     try {
@@ -42,18 +53,38 @@ class ShopifyAuthService {
       return true;
     }
 
+    final pending = _refreshing;
+    if (pending != null) return pending;
+    final refresh = _refreshSession();
+    _refreshing = refresh;
     try {
-      final renewed = await _authenticate(
-        email: '',
-        signUp: false,
-        silent: true,
-      );
-      if (renewed) return true;
-    } catch (_) {
-      // Expired Shopify sessions fall back to an explicit login.
+      return await refresh;
+    } finally {
+      _refreshing = null;
     }
-    await _clearLocalTokens();
-    return false;
+  }
+
+  Future<bool> _refreshSession() async {
+    final refreshToken = await _secureStorage.read(
+      key: 'shopify_refresh_token',
+    );
+    if (refreshToken == null || refreshToken.isEmpty) return false;
+    // A token refresh is non-interactive: never open a browser at checkout/startup.
+    final result = await _appAuth.token(
+      TokenRequest(
+        ShopifyConfig.customerAccountClientId,
+        ShopifyConfig.redirectUrl,
+        refreshToken: refreshToken,
+        serviceConfiguration: const AuthorizationServiceConfiguration(
+          authorizationEndpoint: ShopifyConfig.authorizationEndpoint,
+          tokenEndpoint: ShopifyConfig.tokenEndpoint,
+        ),
+        scopes: ShopifyConfig.customerScopes,
+      ),
+    );
+    if (result.accessToken?.isNotEmpty != true) return false;
+    await _saveTokens(result);
+    return true;
   }
 
   Future<bool> signIn({required String email}) async {
@@ -324,17 +355,19 @@ class ShopifyAuthService {
     await _clearLocalTokens();
   }
 
-  Future<void> _saveTokens(AuthorizationTokenResponse result) async {
+  Future<void> _saveTokens(TokenResponse result) async {
     await Future.wait([
       _secureStorage.write(
         key: 'shopify_access_token',
         value: result.accessToken,
       ),
-      _secureStorage.write(
-        key: 'shopify_refresh_token',
-        value: result.refreshToken,
-      ),
-      _secureStorage.write(key: 'shopify_id_token', value: result.idToken),
+      if (result.refreshToken?.isNotEmpty == true)
+        _secureStorage.write(
+          key: 'shopify_refresh_token',
+          value: result.refreshToken,
+        ),
+      if (result.idToken?.isNotEmpty == true)
+        _secureStorage.write(key: 'shopify_id_token', value: result.idToken),
       _secureStorage.write(
         key: 'shopify_access_token_expiry',
         value: result.accessTokenExpirationDateTime?.toIso8601String(),

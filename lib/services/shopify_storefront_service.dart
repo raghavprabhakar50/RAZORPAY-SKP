@@ -6,6 +6,8 @@ import '../config/shopify_config.dart';
 import '../data/home_catalog_data.dart';
 import '../data/home_storefront_content.dart';
 import '../models/discount_banner.dart';
+import '../models/cart_item.dart';
+import '../models/checkout_coupon.dart';
 import '../models/home_catalog.dart';
 import '../models/home_slide.dart';
 import '../models/storefront_predictive_search_result.dart';
@@ -15,6 +17,229 @@ class ShopifyStorefrontService {
     : _client = client ?? http.Client();
 
   final http.Client _client;
+
+  Future<List<CheckoutCoupon>> fetchCheckoutCoupons() =>
+      _cached('checkout-coupons', () async {
+        try {
+          final payload = await _postGraphQl(r'''
+        query PublicCheckoutCoupons {
+          metaobjects(type: "discount_banner", first: 100, sortKey: "id", reverse: true) {
+            nodes {
+              code: field(key: "coupon_code") { value }
+              heading: field(key: "heading") { value }
+              subtitle: field(key: "subtitle") { value }
+              active: field(key: "active") { value }
+              startsAt: field(key: "starts_at") { value }
+              endsAt: field(key: "ends_at") { value }
+            }
+          }
+        }
+      ''').timeout(const Duration(seconds: 12));
+          final nodes = payload['data']?['metaobjects']?['nodes'];
+          final coupons = CheckoutCoupon.published(
+            nodes is List ? nodes : [],
+            DateTime.now(),
+          );
+          return coupons.isEmpty ? CheckoutCoupon.publicFallback : coupons;
+        } catch (_) {
+          return CheckoutCoupon.publicFallback;
+        }
+      });
+
+  /// Online Store cart, not Storefront API checkoutUrl. This loads the merchant
+  /// theme and its existing Magic Checkout button. No customer token in URL.
+  static Uri websiteCartUrl(List<CartItem> items, {String orderNote = ''}) {
+    final note = normalizeOrderNote(orderNote);
+    if (items.isEmpty || items.length > 50) {
+      throw StateError('Add between 1 and 50 items before checkout.');
+    }
+    final quantities = <String, int>{};
+    Map<String, String>? firstProperties;
+    for (var index = 0; index < items.length; index++) {
+      final item = items[index];
+      final match = RegExp(r'^gid://shopify/ProductVariant/([1-9][0-9]{0,24})$')
+          .firstMatch(item.variantId ?? '');
+      if (match == null ||
+          !item.availableForSale ||
+          item.quantity < 1 ||
+          item.quantity > 20) {
+        throw StateError('An item is unavailable. Refresh your cart.');
+      }
+      final variant = match.group(1)!;
+      final properties = <String, String>{
+        if (item.giftCard != 'Not Required') 'Gift Card': item.giftCard,
+        if (item.giftMessage.trim().isNotEmpty)
+          'Gift Message': item.giftMessage.trim(),
+      };
+      // Shopify permalinks support properties on the FIRST product only.
+      // Never silently drop gift instructions or merge differently gifted lines.
+      if ((index != 0 && properties.isNotEmpty) ||
+          (quantities.containsKey(variant) && firstProperties != null)) {
+        throw UnsupportedError(
+          'This gift cart requires the authenticated Shopify checkout.',
+        );
+      }
+      if (properties.values.any((v) => v.length > 500)) {
+        throw StateError('Gift instructions are too long.');
+      }
+      if (index == 0 && properties.isNotEmpty) firstProperties = properties;
+      quantities.update(
+        variant,
+        (q) => q + item.quantity,
+        ifAbsent: () => item.quantity,
+      );
+      if (quantities[variant]! > 20) {
+        throw StateError('Maximum quantity is 20 per variant.');
+      }
+    }
+    final host = ShopifyConfig.storefrontDomain;
+    if (host.isEmpty ||
+        host.contains('/') ||
+        host.contains('@') ||
+        host.contains(':')) {
+      throw StateError('Storefront address is not configured.');
+    }
+    final uri = Uri.https(
+      host,
+      '/cart/${quantities.entries.map((e) => '${e.key}:${e.value}').join(',')}',
+      {
+        'storefront': 'true',
+        if (note.isNotEmpty) 'note': note,
+        if (firstProperties != null)
+          'properties': base64Url.encode(
+            utf8.encode(jsonEncode(firstProperties)),
+          ),
+      },
+    );
+    if (uri.toString().length > 7500) {
+      throw UnsupportedError('This cart requires Shopify checkout.');
+    }
+    return uri;
+  }
+
+  static String normalizeOrderNote(String value) {
+    final note = value.trim();
+    if (note.length > 1000 || note.contains('\u0000')) {
+      throw StateError('Enter order instructions under 1000 characters.');
+    }
+    return note;
+  }
+
+  /// Uses the existing Shopify hosted checkout and its configured payment apps.
+  /// Never creates a middleware draft/Razorpay order or accepts local prices.
+  Future<Uri> createWebCheckout(
+    List<CartItem> items, {
+    required String customerAccessToken,
+    String discountCode = '',
+    String orderNote = '',
+  }) async {
+    final note = normalizeOrderNote(orderNote);
+    if (customerAccessToken.isEmpty ||
+        items.isEmpty ||
+        items.length > 50 ||
+        items.any(
+          (i) =>
+              i.variantId == null ||
+              !RegExp(r'^gid://shopify/ProductVariant/[1-9][0-9]*$')
+                  .hasMatch(i.variantId!) ||
+              !i.availableForSale ||
+              i.quantity < 1 ||
+              i.quantity > 20,
+        )) {
+      throw StateError('Refresh your cart and sign in before checkout.');
+    }
+    final response = await _postGraphQl(
+      r'''
+      mutation AppWebCheckout($input: CartInput!) {
+        cartCreate(input: $input) {
+          cart {
+            checkoutUrl
+            discountCodes { code applicable }
+            lines(first: 100) { nodes { quantity merchandise { ... on ProductVariant { id availableForSale } } } }
+          }
+          userErrors { message }
+          warnings { message }
+        }
+      }
+    ''',
+      variables: {
+        'input': {
+          if (note.isNotEmpty) 'note': note,
+          'buyerIdentity': {
+            'customerAccessToken': customerAccessToken,
+            'countryCode': 'IN',
+          },
+          'discountCodes': [
+            if (discountCode.trim().isNotEmpty) discountCode.trim(),
+          ],
+          'lines': items
+              .map(
+                (i) => {
+                  'merchandiseId': i.variantId,
+                  'quantity': i.quantity,
+                  'attributes': [
+                    if (i.giftCard != 'Not Required')
+                      {'key': 'Gift Card', 'value': i.giftCard},
+                    if (i.giftMessage.trim().isNotEmpty)
+                      {'key': 'Gift Message', 'value': i.giftMessage.trim()},
+                  ],
+                },
+              )
+              .toList(),
+        },
+      },
+    ).timeout(const Duration(seconds: 35));
+    final result = response['data']?['cartCreate'];
+    if (result is! Map ||
+        (result['userErrors'] as List?)?.isNotEmpty == true ||
+        (result['warnings'] as List?)?.isNotEmpty == true ||
+        result['cart'] is! Map) {
+      throw StateError(
+        'Shopify could not prepare every item. Review stock and your coupon.',
+      );
+    }
+    final cart = result['cart'] as Map;
+    final expected = <String, int>{};
+    for (final i in items) {
+      expected.update(
+        i.variantId!,
+        (q) => q + i.quantity,
+        ifAbsent: () => i.quantity,
+      );
+    }
+    final actual = <String, int>{};
+    for (final line in cart['lines']['nodes'] as List) {
+      final variant = line['merchandise'];
+      if (variant['availableForSale'] != true) {
+        throw StateError('An item is unavailable. Refresh your cart.');
+      }
+      actual.update(
+        variant['id'] as String,
+        (q) => q + (line['quantity'] as int),
+        ifAbsent: () => line['quantity'] as int,
+      );
+    }
+    if (actual.length != expected.length ||
+        expected.entries.any((e) => actual[e.key] != e.value) ||
+        (cart['discountCodes'] as List).any((c) => c['applicable'] != true)) {
+      throw StateError(
+        'Cart quantity or coupon changed. Please review before paying.',
+      );
+    }
+    final uri = Uri.tryParse(cart['checkoutUrl']?.toString() ?? '');
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        !{
+          ShopifyConfig.shopDomain,
+          ShopifyConfig.storefrontDomain,
+          'srikrishnapearls.com',
+          'checkout.shopify.com',
+        }.contains(uri.host)) {
+      throw StateError('Shopify returned an unexpected checkout address.');
+    }
+    return uri;
+  }
 
   static const _cacheLifetime = Duration(minutes: 5);
   final Map<String, _StorefrontCacheEntry> _cache = {};

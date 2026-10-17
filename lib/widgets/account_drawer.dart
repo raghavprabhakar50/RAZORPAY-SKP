@@ -7,6 +7,7 @@ class AccountDrawer extends StatelessWidget {
   const AccountDrawer({
     required this.onHome,
     required this.onProfile,
+    required this.onOrders,
     required this.onWishlist,
     required this.onCart,
     required this.onLogin,
@@ -16,6 +17,7 @@ class AccountDrawer extends StatelessWidget {
 
   final VoidCallback onHome;
   final VoidCallback onProfile;
+  final VoidCallback onOrders;
   final VoidCallback onWishlist;
   final VoidCallback onCart;
   final VoidCallback onLogin;
@@ -106,6 +108,11 @@ class AccountDrawer extends StatelessWidget {
                     context,
                     account.isAuthenticated ? onProfile : onLogin,
                   ),
+                ),
+                _DrawerTile(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'My Orders',
+                  onTap: () => _select(context, onOrders),
                 ),
                 _DrawerTile(
                   icon: Icons.favorite_border_rounded,

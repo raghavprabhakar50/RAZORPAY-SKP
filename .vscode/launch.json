@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Sri Krishna Pearls - Local XAMPP",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=SKP_MIDDLEWARE_BASE_URL=http://10.0.2.2/Sri%20Krishna%20Pearls%20Middleware"
+      ]
+    }
+  ]
+}

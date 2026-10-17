@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../orders/my_orders_screen.dart';
+
 import '../../data/home_screen_data.dart';
 import '../../models/discount_banner.dart';
 import '../../models/home_catalog.dart';
@@ -197,6 +199,12 @@ class _HomeScreenState extends State<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const ProfileScreen()));
   }
 
+  Future<void> _openOrders() async {
+    if (!await _ensureLogin() || !mounted) return;
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const MyOrdersScreen()));
+  }
+
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -293,6 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
       drawer: AccountDrawer(
         onHome: () {},
         onProfile: _openProfile,
+        onOrders: _openOrders,
         onWishlist: _openWishlist,
         onCart: _openCart,
         onLogin: _openProfile,
