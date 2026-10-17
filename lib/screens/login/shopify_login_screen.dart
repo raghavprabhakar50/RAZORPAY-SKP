@@ -190,11 +190,22 @@ class _ShopifyLoginScreenState extends State<ShopifyLoginScreen> {
                       child: TextButton(
                         onPressed: _submitting
                             ? null
-                            : () => Navigator.of(context).pushReplacement(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const SignupScreen(),
-                                ),
-                              ),
+                            : () async {
+                                final signedUp = await Navigator.of(context)
+                                    .push<bool>(
+                                      MaterialPageRoute<bool>(
+                                        builder: (_) => SignupScreen(
+                                          returnToPrevious:
+                                              widget.returnToPrevious,
+                                        ),
+                                      ),
+                                    );
+                                if (!context.mounted) return;
+                                if (signedUp == true &&
+                                    widget.returnToPrevious) {
+                                  Navigator.of(context).pop(true);
+                                }
+                              },
                         style: TextButton.styleFrom(foregroundColor: _brown),
                         child: const Text('New customer? Create account'),
                       ),

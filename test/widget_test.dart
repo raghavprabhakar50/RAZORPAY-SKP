@@ -185,37 +185,77 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('guest checkout requires Shopify login', (
-    WidgetTester tester,
-  ) async {
-    const product = StorefrontProduct(
-      id: 'gid://shopify/Product/checkout-test',
-      handle: 'checkout-test',
-      title: 'Checkout Test Pearl Set',
-      amount: 3999,
-      currencyCode: 'INR',
-    );
-    final store = ShoppingStore.instance;
-    store.addToCart(product: product);
-    final cartKey = store.cart
-        .firstWhere((item) => item.productHandle == product.handle)
-        .key;
+  for (final signup in [false, true]) {
+    testWidgets(
+      'guest ${signup ? 'signup' : 'login'} returns to cart and requires another checkout tap',
+      (WidgetTester tester) async {
+        const product = StorefrontProduct(
+          id: 'gid://shopify/Product/checkout-test',
+          handle: 'checkout-test',
+          title: 'Checkout Test Pearl Set',
+          amount: 3999,
+          currencyCode: 'INR',
+        );
+        final store = ShoppingStore.instance;
+        store.addToCart(product: product);
+        final cartKey = store.cart
+            .firstWhere((item) => item.productHandle == product.handle)
+            .key;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CartScreen(storefrontService: _ProductService(product)),
-      ),
-    );
-    expect(find.text('Sign in to Checkout'), findsOneWidget);
-    expect(find.text('COUPON OFFER'), findsNothing);
-    expect(find.textContaining('View available'), findsNothing);
-    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
-    await tester.tap(find.text('Sign in to Checkout'));
-    await tester.pumpAndSettle();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: CartScreen(storefrontService: _ProductService(product)),
+          ),
+        );
+        expect(find.text('Sign in to Checkout'), findsOneWidget);
+        expect(find.text('COUPON OFFER'), findsNothing);
+        expect(find.textContaining('View available'), findsNothing);
+        expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+        await tester.tap(find.text('Sign in to Checkout'));
+        await tester.pumpAndSettle();
 
-    expect(find.byType(ShopifyLoginScreen), findsOneWidget);
-    store.removeCartItem(cartKey);
-  });
+        expect(find.byType(ShopifyLoginScreen), findsOneWidget);
+        if (signup) {
+          await tester.ensureVisible(find.text('New customer? Create account'));
+          await tester.tap(find.text('New customer? Create account'));
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .widget<SignupScreen>(find.byType(SignupScreen))
+                .returnToPrevious,
+            isTrue,
+          );
+        }
+        AccountStore.instance.debugSetAuthenticated(
+          true,
+          profile: const CustomerProfile(
+            id: 'gid://shopify/Customer/90001',
+            email: 'customer@example.com',
+            firstName: 'Krishna',
+          ),
+        );
+        Navigator.of(
+          tester.element(
+            find.byType(signup ? SignupScreen : ShopifyLoginScreen),
+          ),
+        ).pop(true);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(CartScreen), findsOneWidget);
+        expect(find.byType(ShopifyLoginScreen), findsNothing);
+        expect(find.text('Complete your profile'), findsNothing);
+        expect(find.text('Check Out'), findsOneWidget);
+        expect(find.byIcon(Icons.lock_outline_rounded), findsNothing);
+        expect(store.cart.any((item) => item.key == cartKey), isTrue);
+
+        // Only a fresh checkout tap may continue to profile/payment steps.
+        await tester.tap(find.text('Check Out'));
+        await tester.pumpAndSettle();
+        expect(find.text('Complete your profile'), findsOneWidget);
+        store.removeCartItem(cartKey);
+      },
+    );
+  }
 
   testWidgets('checkout requires a complete customer profile', (
     WidgetTester tester,

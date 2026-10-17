@@ -84,6 +84,9 @@ class _CartScreenState extends State<CartScreen> {
         ),
       );
       if (loggedIn != true || !context.mounted) return;
+      // Signing in completes this action. Let the customer review their current
+      // cart and coupons before explicitly starting checkout with another tap.
+      return;
     }
     final profile = AccountStore.instance.profile;
     if (profile == null || !profile.isCheckoutReady) {

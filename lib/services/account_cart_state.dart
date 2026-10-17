@@ -1,7 +1,7 @@
 import '../models/cart_item.dart';
 
 /// Local cart ownership is a verified customer GID, never an email/display name.
-/// Guest items are consumed exactly once by the next authenticated account.
+/// A nonempty guest cart replaces the next authenticated account's saved cart.
 class AccountCartState {
   final Map<String, List<CartItem>> _carts = {};
   final List<void Function()> _beforeLoad = [];
@@ -28,6 +28,9 @@ class AccountCartState {
       final guest = [...?_carts['guest'], ...?_carts['authenticating']];
       _carts['guest'] = [];
       _carts['authenticating'] = [];
+      // The current guest shopping session wins over an older saved cart.
+      // Empty guest sessions still restore the customer's own saved items.
+      if (guest.isNotEmpty) _carts[next] = [];
       for (final item in guest) {
         _add(next, item);
       }

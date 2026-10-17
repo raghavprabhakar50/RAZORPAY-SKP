@@ -1,10 +1,12 @@
 # Account-isolated carts
 
 Cart storage is local to this device, keyed by verified Shopify Customer GID.
-Guest items merge once into the next authenticated customer, matching gift-aware
-line keys and adding quantities. The guest cart is then consumed. Logout switches
+When guest items exist, they replace the next authenticated customer's older
+saved cart rather than merging with it. Current guest quantities and gift-aware
+line keys are preserved. The guest cart is then consumed. Logout switches
 to a separate guest cart immediately; switching A to B never merges A's cart into
-B. Returning to A restores A's own saved cart (not an always-empty cart).
+B. Returning to A with an empty guest cart restores A's own saved cart. Returning
+with a nonempty guest cart uses only those guest items, replacing A's saved cart.
 
 Startup disk restoration replays account switches and edits made while storage
 was loading. This avoids overwriting early guest additions or merging a persisted
@@ -20,4 +22,4 @@ update; they are not deleted. The previous wishlist behaviour is unchanged.
 This does not sync carts between phones and does not change Shopify checkout,
 orders, credentials or middleware payment mappings. No login credentials/tokens
 are stored inside cart payloads. Tests cover guest transfer, account switching,
-gift variants, quantity merge, restart ownership and startup races.
+gift variants, replacement quantities, restart ownership and startup races.

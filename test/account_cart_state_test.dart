@@ -33,19 +33,21 @@ void main() {
     state.selectAccount(b);
     expect(state.items.single.productId, '2');
   });
-  test('guest cart merges quantity into matching account lines without losing gift variants', () {
+  test('guest cart replaces saved lines and quantities without losing gift variants', () {
     final state = AccountCartState()..restore({});
     state.selectAccount(a);
     state.add(item('1', quantity: 2));
+    state.add(item('2'));
     state.selectAccount(null);
     state.add(item('1'));
     state.add(item('1', gift: 'Birthday'));
     state.selectAccount(a);
     expect(state.items.length, 2);
-    expect(state.items.first.quantity, 3);
+    expect(state.items.first.quantity, 1);
+    expect(state.items.any((line) => line.productId == '2'), isFalse);
     expect(state.items.last.giftMessage, 'Birthday');
     state.selectAccount(a);
-    expect(state.items.first.quantity, 3);
+    expect(state.items.first.quantity, 1);
   });
   test('switching directly between accounts never merges one user cart into another', () {
     final state = AccountCartState()..restore({});
@@ -67,7 +69,7 @@ void main() {
     state.add(item('3'));
     state.selectAccount(a);
     state.restore(saved.toJson());
-    expect(state.items.map((i) => i.productId).toSet(), {'1', '2', '3'});
+    expect(state.items.map((i) => i.productId).toSet(), {'1', '3'});
     state.selectAccount(null);
     expect(state.items, isEmpty);
     state.selectAccount(b);

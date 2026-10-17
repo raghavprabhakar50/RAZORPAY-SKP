@@ -5,7 +5,9 @@ import '../../services/shopify_auth_service.dart';
 import '../home/home_screen.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key});
+  const SignupScreen({this.returnToPrevious = false, super.key});
+
+  final bool returnToPrevious;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -51,6 +53,10 @@ class _SignupScreenState extends State<SignupScreen> {
           phone: _phoneController.text,
         );
         if (!mounted) return;
+        if (widget.returnToPrevious) {
+          Navigator.of(context).pop(true);
+          return;
+        }
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
           (_) => false,
