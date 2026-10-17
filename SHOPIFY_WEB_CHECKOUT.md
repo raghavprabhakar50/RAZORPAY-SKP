@@ -1,5 +1,20 @@
 # App checkout: existing Shopify hosted checkout
 
+## Live app configuration
+
+The default middleware is `https://shri-middleware.ekarigar.com`. VS Code's first
+launch configuration is **Sri Krishna Pearls - Live Middleware**. Alternatively,
+run `powershell -File scripts/run_live.ps1` or build for production with:
+
+```powershell
+flutter build appbundle --release --dart-define=SKP_MIDDLEWARE_BASE_URL=https://shri-middleware.ekarigar.com
+```
+
+Do not use `scripts/run_local.ps1` or an old private `.env` file containing a
+localhost override for live builds. Local XAMPP remains an explicit development
+option. This configures the URL only; deploy and verify middleware authentication,
+database access and Shopify order sync before releasing to customers.
+
 My Orders now uses the authenticated middleware `/api/mobile/orders` endpoint
 and native list screen instead of website order history. Its data source is the
 middleware's synchronized orders/customer mapping. Deploy the corresponding

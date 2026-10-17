@@ -2,6 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Sri Krishna Pearls - Live Middleware",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=SKP_MIDDLEWARE_BASE_URL=https://shri-middleware.ekarigar.com"
+      ]
+    },
+    {
       "name": "Sri Krishna Pearls - Local XAMPP",
       "request": "launch",
       "type": "dart",
