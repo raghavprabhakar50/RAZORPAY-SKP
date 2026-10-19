@@ -11,12 +11,191 @@ import '../models/checkout_coupon.dart';
 import '../models/home_catalog.dart';
 import '../models/home_slide.dart';
 import '../models/storefront_predictive_search_result.dart';
+import 'shopify_auth_service.dart';
 
 class ShopifyStorefrontService {
-  ShopifyStorefrontService({http.Client? client})
-    : _client = client ?? http.Client();
+  ShopifyStorefrontService({
+    http.Client? client,
+    Future<String> Function()? checkoutTokenProvider,
+  }) : _client = client ?? http.Client(),
+       _checkoutToken =
+           checkoutTokenProvider ?? ShopifyAuthService().checkoutAccessToken;
 
   final http.Client _client;
+  final Future<String> Function() _checkoutToken;
+
+  /// Evaluate public codes directly with Shopify on an isolated cart. Does not
+  /// create an order/payment or alter the cart later opened by checkout.
+  Future<List<CheckoutCoupon>> checkCouponEligibility(
+    List<CartItem> items,
+    List<CheckoutCoupon> coupons,
+  ) async {
+    if (coupons.isEmpty) return const [];
+    if (items.isEmpty ||
+        items.length > 50 ||
+        coupons.length > 100 ||
+        items.any(
+          (i) =>
+              !RegExp(r'^gid://shopify/ProductVariant/[1-9][0-9]*$')
+                  .hasMatch(i.variantId ?? '') ||
+              !i.availableForSale ||
+              i.quantity < 1 ||
+              i.quantity > 20,
+        )) {
+      throw StateError('Refresh your cart before checking coupons.');
+    }
+    final expected = <String, int>{};
+    for (final item in items) {
+      expected.update(
+        item.variantId!,
+        (q) => q + item.quantity,
+        ifAbsent: () => item.quantity,
+      );
+    }
+    if (expected.values.any((q) => q > 20)) {
+      throw StateError('Maximum quantity is 20 per variant.');
+    }
+    final token = await _checkoutToken();
+    if (token.isEmpty) throw StateError('Please sign in again.');
+    final response = await _postGraphQl(
+      r'''
+      mutation CouponCheckCart($input: CartInput!) {
+        cartCreate(input: $input) {
+          cart { id lines(first: 100) { nodes { quantity merchandise { ... on ProductVariant { id availableForSale } } } } }
+          userErrors { message } warnings { code message }
+        }
+      }
+    ''',
+      variables: {
+        'input': {
+          'buyerIdentity': {'customerAccessToken': token, 'countryCode': 'IN'},
+          'lines': items
+              .map(
+                (i) => {
+                  'merchandiseId': i.variantId,
+                  'quantity': i.quantity,
+                  'attributes': [
+                    if (i.giftCard != 'Not Required')
+                      {'key': 'Gift Card', 'value': i.giftCard},
+                    if (i.giftMessage.trim().isNotEmpty)
+                      {'key': 'Gift Message', 'value': i.giftMessage.trim()},
+                  ],
+                },
+              )
+              .toList(),
+        },
+      },
+    ).timeout(const Duration(seconds: 25));
+    final result = response['data']?['cartCreate'];
+    const rejectionWarnings = {
+      'DISCOUNT_CODE_NOT_HONOURED',
+      'DISCOUNT_CURRENTLY_INACTIVE',
+      'DISCOUNT_CUSTOMER_NOT_ELIGIBLE',
+      'DISCOUNT_CUSTOMER_USAGE_LIMIT_REACHED',
+      'DISCOUNT_INCOMPATIBLE_PURCHASE_TYPE',
+      'DISCOUNT_NO_ENTITLED_LINE_ITEMS',
+      'DISCOUNT_NO_ENTITLED_SHIPPING_LINES',
+      'DISCOUNT_NOT_FOUND',
+      'DISCOUNT_PURCHASE_NOT_IN_RANGE',
+      'DISCOUNT_QUANTITY_NOT_IN_RANGE',
+      'DISCOUNT_USAGE_LIMIT_REACHED',
+    };
+    bool valid(dynamic r, {bool discountCheck = false}) =>
+        r is Map &&
+        r['cart'] is Map &&
+        (r['userErrors'] as List?)?.isNotEmpty != true &&
+        ((r['warnings'] as List?) ?? []).every(
+          (warning) =>
+              discountCheck &&
+              warning is Map &&
+              rejectionWarnings.contains(warning['code']),
+        );
+    if (!valid(result) ||
+        result['cart']['id'] is! String ||
+        result['cart']['lines']?['nodes'] is! List) {
+      throw StateError('Refresh your cart before checking coupons.');
+    }
+    final actual = <String, int>{};
+    for (final line in result['cart']['lines']['nodes']) {
+      final variant = line['merchandise'];
+      if (variant is! Map ||
+          variant['id'] is! String ||
+          variant['availableForSale'] != true ||
+          line['quantity'] is! int) {
+        throw StateError('An item is unavailable. Refresh your cart.');
+      }
+      actual.update(
+        variant['id'] as String,
+        (q) => q + (line['quantity'] as int),
+        ifAbsent: () => line['quantity'] as int,
+      );
+    }
+    if (actual.length != expected.length ||
+        expected.entries.any((e) => actual[e.key] != e.value)) {
+      throw StateError(
+        'Cart quantity changed. Refresh before checking coupons.',
+      );
+    }
+    final checked = <CheckoutCoupon>[];
+    final watch = Stopwatch()..start();
+    for (var start = 0; start < coupons.length; start += 10) {
+      if (watch.elapsed > const Duration(seconds: 25)) {
+        throw StateError('Coupon checks timed out. Please retry.');
+      }
+      final batch = coupons.skip(start).take(10).toList();
+      final variables = <String, dynamic>{'id': result['cart']['id']};
+      final definitions = <String>[r'$id: ID!'];
+      final fields = <String>[];
+      for (var i = 0; i < batch.length; i++) {
+        definitions.add('\$c$i: [String!]!');
+        variables['c$i'] = [batch[i].code];
+        fields.add(
+          'c$i: cartDiscountCodesUpdate(cartId: \$id, discountCodes: \$c$i) { cart { discountCodes { code applicable } } userErrors { message } warnings { code message } }',
+        );
+      }
+      // Each top-level mutation replaces the prior code on this temporary cart,
+      // so incompatible coupon combinations do not produce false negatives.
+      final data = await _postGraphQl(
+        'mutation CheckCartCoupons(${definitions.join(',')}) { ${fields.join(' ')} }',
+        variables: variables,
+      ).timeout(const Duration(seconds: 25));
+      for (var i = 0; i < batch.length; i++) {
+        final row = data['data']?['c$i'];
+        if (!valid(row, discountCheck: true) ||
+            row['cart']['discountCodes'] is! List) {
+          throw StateError('Could not verify coupons. Please retry.');
+        }
+        bool? applies;
+        for (final code in row['cart']['discountCodes']) {
+          if (code is Map &&
+              code['code'] is String &&
+              (code['code'] as String).toUpperCase() ==
+                  batch[i].code.toUpperCase() &&
+              code['applicable'] is bool) {
+            applies = code['applicable'] as bool;
+          }
+        }
+        if (applies == null) {
+          throw StateError(
+            'Shopify did not confirm coupon eligibility. Please retry.',
+          );
+        }
+        if (applies && (row['warnings'] as List?)?.isNotEmpty == true) {
+          throw StateError('Coupon eligibility changed. Please retry.');
+        }
+        checked.add(
+          CheckoutCoupon(
+            code: batch[i].code,
+            title: batch[i].title,
+            description: batch[i].description,
+            applicable: applies,
+            eligibilityMessage: applies ? 'Available for this cart' : 'Not applicable to this cart. Check minimum purchase and eligible products.',
+          ),
+        );
+      }
+    }
+    return List.unmodifiable(checked);
+  }
 
   Future<List<CheckoutCoupon>> fetchCheckoutCoupons() =>
       _cached('checkout-coupons', () async {

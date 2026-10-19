@@ -21,6 +21,11 @@ import '../wishlist/wishlist_screen.dart';
 const _cartBrown = Color(0xffa66042);
 const _cartText = Color(0xff574335);
 
+class _CouponOffersFailure implements Exception {
+  const _CouponOffersFailure(this.message);
+  final String message;
+}
+
 class CartScreen extends StatefulWidget {
   const CartScreen({
     required this.storefrontService,
@@ -40,11 +45,14 @@ class _CartScreenState extends State<CartScreen> {
   late final _service = widget.checkoutService ?? MiddlewareCheckoutService();
   ShopifyStorefrontService get storefrontService => widget.storefrontService;
   bool _working = false;
-  String _progress = 'Opening checkout…';
+  bool _openingCheckout = false;
+  String _progress = 'Open payment checkout';
   String? _notice;
   final _orderInstructions = TextEditingController();
   String? _selectedCoupon;
-  late final _coupons = storefrontService.fetchCheckoutCoupons();
+  Future<List<CheckoutCoupon>>? _coupons;
+  String? _couponCustomer;
+  String? _couponCart;
 
   Future<void> _begin(BuildContext context) async {
     if (_working) return;
@@ -61,7 +69,12 @@ class _CartScreenState extends State<CartScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _working = false);
+      if (mounted) {
+        setState(() {
+          _working = false;
+          _openingCheckout = false;
+        });
+      }
     }
   }
 
@@ -131,9 +144,10 @@ class _CartScreenState extends State<CartScreen> {
         ShoppingStore.instance.cart.isEmpty) {
       return;
     }
+    setState(() => _openingCheckout = true);
     await _service.prepareHostedCheckout(checkoutProfile.id);
     if (!mounted) return;
-    setState(() => _progress = 'Opening Shopify checkout...');
+    setState(() => _progress = 'Open payment checkout');
     final items = List<CartItem>.unmodifiable(ShoppingStore.instance.cart);
     final token = await ShopifyAuthService().checkoutAccessToken();
     final checkout = await storefrontService.createWebCheckout(
@@ -153,11 +167,6 @@ class _CartScreenState extends State<CartScreen> {
     }
     // Opening/closing a browser is not payment proof. Keep the cart intact;
     // Shopify owns payment confirmation and existing order/webhook sync.
-    if (mounted) {
-      setState(
-        () => _notice = 'Shopify checkout opened. Check your orders to confirm payment before paying again.',
-      );
-    }
   }
 
   @override
@@ -190,6 +199,18 @@ class _CartScreenState extends State<CartScreen> {
         builder: (context, _) {
           final store = ShoppingStore.instance;
           if (store.cart.isEmpty) return const _EmptyCart();
+          final customer = AccountStore.instance.isAuthenticated
+              ? AccountStore.instance.profile?.id
+              : null;
+          final cartSignature = store.cart
+              .map((i) => '${i.key}:${i.quantity}:${i.variantId}')
+              .join('|');
+          if (_couponCustomer != customer || _couponCart != cartSignature) {
+            _couponCustomer = customer;
+            _couponCart = cartSignature;
+            _coupons = null;
+            _selectedCoupon = null;
+          }
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
             children: [
@@ -199,10 +220,74 @@ class _CartScreenState extends State<CartScreen> {
               const SizedBox(height: 16),
               if (AccountStore.instance.isAuthenticated) ...[
                 FutureBuilder<List<CheckoutCoupon>>(
-                  future: _coupons,
+                  key: ValueKey('$customer:$cartSignature'),
+                  future: _coupons ??=
+                      Future<void>.delayed(
+                        const Duration(milliseconds: 350),
+                      ).then((_) async {
+                        if (!mounted ||
+                            _couponCustomer != customer ||
+                            _couponCart != cartSignature) {
+                          return <CheckoutCoupon>[];
+                        }
+                        final items = List<CartItem>.unmodifiable(store.cart);
+                        final List<CheckoutCoupon> offers;
+                        try {
+                          offers = await _service.fetchCoupons();
+                        } catch (_) {
+                          throw const _CouponOffersFailure(
+                            'Unable to load coupon offers.',
+                          );
+                        }
+                        if (!mounted ||
+                            _couponCustomer != customer ||
+                            _couponCart != cartSignature) {
+                          return <CheckoutCoupon>[];
+                        }
+                        try {
+                          return await storefrontService.checkCouponEligibility(
+                            items,
+                            offers,
+                          );
+                        } catch (_) {
+                          throw const _CouponOffersFailure(
+                            'Unable to check coupons for this cart.',
+                          );
+                        }
+                      }),
                   builder: (context, snapshot) {
-                    final coupons =
-                        snapshot.data ?? CheckoutCoupon.publicFallback;
+                    if (snapshot.hasError) {
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              snapshot.error is _CouponOffersFailure
+                                  ? (snapshot.error as _CouponOffersFailure)
+                                        .message
+                                  : 'Unable to load coupon offers.',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _working
+                                ? null
+                                : () => setState(() => _coupons = null),
+                            child: const Text('Retry coupons'),
+                          ),
+                        ],
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const Text('Loading coupon offers...');
+                    }
+                    final coupons = snapshot.data!;
+                    if (_selectedCoupon != null &&
+                        !coupons.any(
+                          (c) =>
+                              c.code == _selectedCoupon &&
+                              c.applicable != false,
+                        )) {
+                      _selectedCoupon = null;
+                    }
                     return CartCouponOffers(
                       coupons: coupons,
                       selectedCode: _selectedCoupon,
@@ -255,11 +340,26 @@ class _CartScreenState extends State<CartScreen> {
                             onPressed: _working ? null : () => _begin(context),
                             style: FilledButton.styleFrom(
                               backgroundColor: _cartBrown,
+                              disabledBackgroundColor: _cartBrown,
+                              disabledForegroundColor: Colors.white,
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                if (!AccountStore.instance.isAuthenticated) ...[
+                                if (_openingCheckout) ...[
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                      semanticsLabel: 'Opening checkout',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                ] else if (!AccountStore
+                                    .instance
+                                    .isAuthenticated) ...[
                                   const Icon(
                                     Icons.lock_outline_rounded,
                                     size: 19,

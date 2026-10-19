@@ -112,12 +112,14 @@ class OnboardingPageContent extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.activePage,
+    this.showPageDots = true,
     super.key,
   });
 
   final String title;
   final String subtitle;
   final int activePage;
+  final bool showPageDots;
 
   static const _titleBrown = Color(0xff7d4d39);
 
@@ -167,7 +169,7 @@ class OnboardingPageContent extends StatelessWidget {
                 ),
               ),
               SizedBox(height: compact ? 17 : 23),
-              _PageDots(activePage: activePage),
+              if (showPageDots) _PageDots(activePage: activePage),
             ],
           ),
         );

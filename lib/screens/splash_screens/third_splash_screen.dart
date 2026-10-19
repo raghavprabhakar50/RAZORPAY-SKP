@@ -15,9 +15,7 @@ class ThirdSplashScreen extends StatefulWidget {
 }
 
 class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
-  final PageController _pageController = PageController();
   Timer? _autoAdvanceTimer;
-  int _activePage = 0;
 
   @override
   void initState() {
@@ -29,15 +27,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
     _autoAdvanceTimer?.cancel();
     _autoAdvanceTimer = Timer(const Duration(seconds: 4), () {
       if (!mounted) return;
-      if (_activePage == 0) {
-        _pageController.animateToPage(
-          1,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOutCubic,
-        );
-      } else {
-        _openDestination();
-      }
+      _openDestination();
     });
   }
 
@@ -52,21 +42,12 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
 
   void _handleNext() {
     _autoAdvanceTimer?.cancel();
-    if (_activePage == 0) {
-      _pageController.animateToPage(
-        1,
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOutCubic,
-      );
-      return;
-    }
     _openDestination();
   }
 
   @override
   void dispose() {
     _autoAdvanceTimer?.cancel();
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -75,21 +56,11 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
     return OnboardingSplashLayout(
       onSkip: _openDestination,
       onNext: _handleNext,
-      content: PageView(
-        controller: _pageController,
-        physics: const ClampingScrollPhysics(),
-        onPageChanged: (page) {
-          setState(() => _activePage = page);
-          _scheduleAutoAdvance();
-        },
-        children: const [
-          OnboardingPageContent(
-            title: 'High Quality Pearl\nJewellery',
-            subtitle: 'Rings, Occasion Pieces, Pandora & More.',
-            activePage: 0,
-          ),
-          FourthSplashScreen(),
-        ],
+      content: const OnboardingPageContent(
+        title: 'High Quality Pearl\nJewellery',
+        subtitle: 'Rings, Occasion Pieces, Pandora & More.',
+        activePage: 0,
+        showPageDots: false,
       ),
     );
   }

@@ -16,6 +16,11 @@ class CartCouponOffers extends StatelessWidget {
   final ValueChanged<String?> onChanged;
   final bool enabled;
   static const _brown = Color(0xffa66042);
+  List<CheckoutCoupon> get _ordered => [
+    ...coupons.where((c) => c.applicable == true),
+    ...coupons.where((c) => c.applicable == null),
+    ...coupons.where((c) => c.applicable == false),
+  ];
 
   Future<void> _viewAll(BuildContext context) => showModalBottomSheet<void>(
     context: context,
@@ -45,12 +50,14 @@ class CartCouponOffers extends StatelessWidget {
             style: const TextStyle(color: Colors.black54, fontSize: 12),
           ),
           const SizedBox(height: 20),
-          for (final coupon in coupons)
+          for (final coupon in _ordered)
             Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: coupon.applicable == false
+                    ? const Color(0xfff3f3f3)
+                    : Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xffc8cbd4)),
               ),
@@ -61,6 +68,18 @@ class CartCouponOffers extends StatelessWidget {
                     onChanged(selectedCode == coupon.code ? null : coupon.code);
                     Navigator.of(sheetContext).pop();
                   }),
+                  if (coupon.eligibilityMessage.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      coupon.eligibilityMessage,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: coupon.applicable == false
+                            ? Colors.grey
+                            : const Color(0xff00865b),
+                      ),
+                    ),
+                  ],
                   if (coupon.description.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Text(
@@ -82,7 +101,13 @@ class CartCouponOffers extends StatelessWidget {
 
   Widget _offerRow(CheckoutCoupon coupon, VoidCallback select) => Row(
     children: [
-      const Icon(Icons.discount_rounded, color: Color(0xff00bd83), size: 30),
+      Icon(
+        Icons.discount_rounded,
+        color: coupon.applicable == false
+            ? Colors.grey
+            : const Color(0xff00bd83),
+        size: 30,
+      ),
       const SizedBox(width: 14),
       Expanded(
         child: Column(
@@ -90,11 +115,13 @@ class CartCouponOffers extends StatelessWidget {
           children: [
             Text(
               coupon.code,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 17,
                 letterSpacing: 1,
-                color: Color(0xff080f20),
+                color: coupon.applicable == false
+                    ? Colors.grey
+                    : const Color(0xff080f20),
               ),
             ),
             const SizedBox(height: 4),
@@ -102,7 +129,12 @@ class CartCouponOffers extends StatelessWidget {
               coupon.title.isEmpty ? 'Public website offer' : coupon.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Color(0xff00a979)),
+              style: TextStyle(
+                fontSize: 12,
+                color: coupon.applicable == false
+                    ? Colors.grey
+                    : const Color(0xff00a979),
+              ),
             ),
           ],
         ),
@@ -110,13 +142,17 @@ class CartCouponOffers extends StatelessWidget {
       const SizedBox(width: 12),
       TextButton(
         key: ValueKey('coupon-use-${coupon.code}'),
-        onPressed: enabled ? select : null,
+        onPressed: enabled && coupon.applicable != false ? select : null,
         style: TextButton.styleFrom(
           foregroundColor: const Color(0xff080f20),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         ),
         child: Text(
-          selectedCode == coupon.code ? 'Remove' : 'Apply',
+          coupon.applicable == false
+              ? 'Not eligible'
+              : selectedCode == coupon.code
+              ? 'Remove'
+              : 'Apply',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
@@ -126,9 +162,9 @@ class CartCouponOffers extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (coupons.isEmpty) return const SizedBox.shrink();
-    final preview = coupons.firstWhere(
-      (c) => c.code == selectedCode,
-      orElse: () => coupons.first,
+    final preview = _ordered.firstWhere(
+      (c) => c.code == selectedCode && c.applicable != false,
+      orElse: () => _ordered.first,
     );
     return Container(
       decoration: BoxDecoration(

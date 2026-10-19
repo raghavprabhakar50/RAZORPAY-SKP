@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
 import '../models/cart_item.dart';
+import '../models/checkout_coupon.dart';
 import '../models/customer_profile.dart';
 import 'shopify_auth_service.dart';
 
@@ -95,7 +96,7 @@ class MiddlewareCheckoutService {
         http.Request(
             'POST',
             Uri.parse(
-              '${baseUri.toString().replaceFirst(RegExp(r'/+$'), '')}/api/mobile/${action == 'orders' ? 'orders' : 'checkout/$action'}',
+              '${baseUri.toString().replaceFirst(RegExp(r'/+$'), '')}/api/mobile/${['orders', 'coupons'].contains(action) ? action : 'checkout/$action'}',
             ),
           )
           ..followRedirects = false
@@ -128,6 +129,38 @@ class MiddlewareCheckoutService {
       );
     }
     return Map<String, dynamic>.from(result['data'] as Map);
+  }
+
+  Future<List<CheckoutCoupon>> fetchCoupons() async {
+    final data = await post('coupons', {});
+    if (data['source'] != 'middleware' || data['coupons'] is! List) {
+      throw StateError(
+        'Coupon service needs updating. Please contact the store.',
+      );
+    }
+    final seen = <String>{};
+    return (data['coupons'] as List)
+        .whereType<Map>()
+        .where((row) {
+          final code = row['code'];
+          return code is String &&
+              code.trim().isNotEmpty &&
+              code.length <= 100 &&
+              !RegExp(r'[\x00-\x1f\x7f]').hasMatch(code) &&
+              seen.add(code.toUpperCase());
+        })
+        .map(
+          (row) => CheckoutCoupon(
+            code: (row['code'] as String).trim(),
+            title: row['title'] is String
+                ? row['title'] as String
+                : 'Coupon offer',
+            description: row['description'] is String
+                ? row['description'] as String
+                : 'Eligibility and discount are verified by Shopify at checkout.',
+          ),
+        )
+        .toList(growable: false);
   }
 
   Future<Map<String, dynamic>?> restore(String customer) async {

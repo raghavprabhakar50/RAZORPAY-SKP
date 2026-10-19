@@ -3,10 +3,14 @@ class CheckoutCoupon {
     required this.code,
     required this.title,
     required this.description,
+    this.applicable,
+    this.eligibilityMessage = '',
   });
   final String code;
   final String title;
   final String description;
+  final bool? applicable;
+  final String eligibilityMessage;
 
   // Merchant's publicly advertised website coupon. Never enumerate private
   // Admin discount codes or invent eligibility/savings from the code's name.

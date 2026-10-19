@@ -15,6 +15,49 @@ const second = CheckoutCoupon(
 );
 
 void main() {
+  testWidgets(
+    'eligible coupon previews first; ineligible coupon is grey and disabled',
+    (tester) async {
+      String? selected;
+      const blocked = CheckoutCoupon(
+        code: 'MIN5000',
+        title: 'Minimum purchase 5000',
+        description: 'Terms',
+        applicable: false,
+        eligibilityMessage: 'Not applicable to this cart.',
+      );
+      const eligible = CheckoutCoupon(
+        code: 'YES',
+        title: 'Available offer',
+        description: 'Terms',
+        applicable: true,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CartCouponOffers(
+              coupons: const [blocked, eligible],
+              selectedCode: null,
+              onChanged: (c) => selected = c,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('YES'), findsNWidgets(2));
+      expect(find.text('MIN5000'), findsNothing);
+      await tester.tap(find.text('View available (2)'));
+      await tester.pumpAndSettle();
+      final disabled = find.byKey(const ValueKey('coupon-use-MIN5000'));
+      expect(tester.widget<TextButton>(disabled).onPressed, isNull);
+      expect(find.text('Not eligible'), findsOneWidget);
+      expect(find.text('Not applicable to this cart.'), findsOneWidget);
+      await tester.tap(disabled);
+      expect(selected, isNull);
+      await tester.tap(find.byKey(const ValueKey('coupon-use-YES')).last);
+      await tester.pumpAndSettle();
+      expect(selected, 'YES');
+    },
+  );
   testWidgets('one coupon also exposes the available coupon list', (
     tester,
   ) async {

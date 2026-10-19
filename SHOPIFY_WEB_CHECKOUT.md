@@ -33,19 +33,42 @@ CartInput.discountCodes; Shopify must accept it for the actual customer/cart.
 No savings or reduced cart totals are invented before verification. Invalid codes
 produce a clear error; remove the selection to continue without that code.
 
-Public offer source: Storefront-readable `discount_banner` metaobjects with an
-explicit `coupon_code`, active flag and optional start/end dates. Existing banner
-titles or discount IDs are never interpreted as codes. Current public banners
-have no code field set, so the merchant's publicly advertised SKP5 code is the
-fallback. This fallback is not a guarantee of eligibility or an enumeration of
-all Shopify Admin discounts. Publish public `coupon_code` fields to change the
-list without an app code edit; do not expose private or customer-targeted codes.
+Active coupon source: authenticated `POST /api/mobile/coupons` on the middleware.
+It reads Shopify Admin code discounts server-side, newest-created first, with
+pagination for discounts and codes. It exposes active, started, unexpired,
+all-customer code promotions only; customer/segment-targeted and automatic
+discounts are excluded. Exhausted usage limits are excluded when Shopify reports
+them. Products, collections, minimum purchases and per-customer eligibility are
+still verified by Shopify checkout, not guessed from the coupon name.
 
-Coupon entries are requested newest-created first (`sortKey: id`, reverse order,
-up to 100 entries) before eligibility-date/public-code filtering. Duplicate codes
-keep their newest entry. The default card previews the first offer; explicitly
-selected coupons remain visible on the card. The list is not a complete Admin
-discount-code inventory; unpublished codes cannot appear through this feed.
+The existing card previews the newest code and View available lists every returned
+code and its Shopify summary. The backend caches the shared public list for two
+minutes, after verifying the customer's OAuth token. Guest users neither see nor
+request coupons. Account or cart-line/quantity changes reset selection and reload
+offers after a 350 ms debounce. The app requests only the coupon list from the
+middleware, then sends variant IDs/quantities and its current customer OAuth token
+directly to Shopify Storefront API. Each code is checked independently on one
+temporary cart; no order/payment is created and the real checkout cart is unchanged.
+Prices are never supplied by the app. Applicable offers
+appear first; inapplicable offers are grey with disabled Apply. Final checkout
+still revalidates eligibility and shipping. Cart-specific results are never shared
+in the public-list cache. Missing eligibility from Shopify shows Retry,
+not a fabricated eligible state. An empty list
+stays empty; request failures show Retry rather than silently substituting SKP5.
+Expected Shopify discount-rejection warnings (for example
+`DISCOUNT_CODE_NOT_HONOURED`) with `applicable: false` produce a grey offer rather
+than hiding the list. Stock warnings, unknown warnings, user errors and missing or
+contradictory eligibility still fail closed. Listing failures and eligibility
+failures have distinct generic UI messages; provider payloads/tokens are not shown.
+The older Storefront metaobject method remains unused by the Cart screen.
+
+The already-deployed coupon listing API remains compatible: this eligibility
+change requires no additional middleware deployment. The listing endpoint itself
+requires `Skp_checkout_coupons`, Mobile_checkout and routes from commit `4eaf97f`,
+with server-held `read_discounts` access.
+Admin tokens stay exclusively on the server; no Shopify settings are mutated by
+this listing endpoint. Existing live authentication-forwarding issues must still
+be fixed/verified on the server; changing app source alone is not deployment.
 
 Shopify-hosted checkout's own UI is unchanged. The coupon list is in the app cart,
 not injected into Shopify's hosted payment page. Existing Shopify webhook/order
