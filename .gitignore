@@ -41,6 +41,11 @@ Keys.txt
 *.keystore
 *.jks
 key.properties
+# Apple signing material must stay outside source control.
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
 
 # Symbolication related
 app.*.symbols
