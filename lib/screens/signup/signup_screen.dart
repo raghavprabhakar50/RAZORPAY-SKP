@@ -48,6 +48,7 @@ class _SignupScreenState extends State<SignupScreen> {
       if (success) {
         await AccountStore.instance.completeAuthentication(
           fallbackEmail: _emailController.text,
+          expectedEmail: _emailController.text,
           firstName: _firstNameController.text,
           lastName: _lastNameController.text,
           phone: _phoneController.text,
@@ -62,12 +63,12 @@ class _SignupScreenState extends State<SignupScreen> {
           (_) => false,
         );
       }
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Signup was not completed. Please try again in the Shopify window.',
+            error is StateError ? error.message.toString() : 'Signup was not completed. Please try again in the Shopify window.',
           ),
         ),
       );

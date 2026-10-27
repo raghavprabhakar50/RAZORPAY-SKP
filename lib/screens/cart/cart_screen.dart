@@ -53,6 +53,8 @@ class _CartScreenState extends State<CartScreen> {
   Future<List<CheckoutCoupon>>? _coupons;
   String? _couponCustomer;
   String? _couponCart;
+  String? _pricingKey;
+  Future<CheckoutPriceSummary>? _pricing;
 
   Future<void> _begin(BuildContext context) async {
     if (_working) return;
@@ -216,7 +218,15 @@ class _CartScreenState extends State<CartScreen> {
             children: [
               ...store.cart.map((item) => _CartLineCard(item: item)),
               const SizedBox(height: 16),
-              _CartSummary(store: store),
+              FutureBuilder<CheckoutPriceSummary>(
+                future: _pricingFuture(store, customer, cartSignature),
+                builder: (context, snapshot) => _CartSummary(
+                  store: store,
+                  pricing: snapshot.data,
+                  loading: !snapshot.hasData && !snapshot.hasError,
+                  failed: snapshot.hasError,
+                ),
+              ),
               const SizedBox(height: 16),
               if (AccountStore.instance.isAuthenticated) ...[
                 FutureBuilder<List<CheckoutCoupon>>(
@@ -231,14 +241,9 @@ class _CartScreenState extends State<CartScreen> {
                           return <CheckoutCoupon>[];
                         }
                         final items = List<CartItem>.unmodifiable(store.cart);
-                        final List<CheckoutCoupon> offers;
-                        try {
-                          offers = await _service.fetchCoupons();
-                        } catch (_) {
-                          throw const _CouponOffersFailure(
-                            'Unable to load coupon offers.',
-                          );
-                        }
+                        // Only SKP5 is a customer-entered public code. Shopify
+                        // automatic discounts are calculated by the cart API.
+                        const offers = CheckoutCoupon.publicFallback;
                         if (!mounted ||
                             _couponCustomer != customer ||
                             _couponCart != cartSignature) {
@@ -292,8 +297,11 @@ class _CartScreenState extends State<CartScreen> {
                       coupons: coupons,
                       selectedCode: _selectedCoupon,
                       enabled: !_working,
-                      onChanged: (code) =>
-                          setState(() => _selectedCoupon = code),
+                      onChanged: (code) => setState(() {
+                        _selectedCoupon = code;
+                        _pricingKey = null;
+                        _pricing = null;
+                      }),
                     );
                   },
                 ),
@@ -407,6 +415,37 @@ class _CartScreenState extends State<CartScreen> {
         ],
       ),
     );
+  }
+
+  Future<CheckoutPriceSummary> _pricingFuture(
+    ShoppingStore store,
+    String? customer,
+    String cartSignature,
+  ) {
+    final key = '$customer:$cartSignature:${_selectedCoupon ?? ''}';
+    if (_pricingKey != key || _pricing == null) {
+      _pricingKey = key;
+      _pricing = () async {
+        final token = await ShopifyAuthService().checkoutAccessToken();
+        final pricing = await storefrontService.previewCartTotals(
+          List<CartItem>.unmodifiable(store.cart),
+          customerAccessToken: token,
+          discountCode: _selectedCoupon ?? '',
+        );
+        if (pricing.discount <= 0 || pricing.discountCodes.isNotEmpty) {
+          return pricing;
+        }
+        final banners = await storefrontService.fetchDiscountBanners();
+        final title = banners
+            .where((banner) => banner.isVisibleAt(DateTime.now()))
+            .map((banner) => banner.discountTitle.trim())
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+        return title.isEmpty
+            ? pricing
+            : pricing.copyWith(discountCodes: [title]);
+      }();
+    }
+    return _pricing!;
   }
 }
 
@@ -647,13 +686,30 @@ class _QuantityControl extends StatelessWidget {
 }
 
 class _CartSummary extends StatelessWidget {
-  const _CartSummary({required this.store});
+  const _CartSummary({
+    required this.store,
+    this.pricing,
+    this.loading = false,
+    this.failed = false,
+  });
 
   final ShoppingStore store;
+  final CheckoutPriceSummary? pricing;
+  final bool loading;
+  final bool failed;
 
   @override
   Widget build(BuildContext context) {
-    final currency = store.cart.first.currencyCode;
+    final currency = pricing?.currencyCode ?? store.cart.first.currencyCode;
+    // The app price is the subtotal; Shopify's preview total already includes
+    // automatic/code discounts. The difference is the customer's saving.
+    final subtotal = store.cartSubtotal;
+    final total = pricing?.total ?? subtotal;
+    final discount = (subtotal - total).clamp(0.0, double.infinity).toDouble();
+    final discountCodes = pricing?.discountCodes ?? const <String>[];
+    final discountLabel = discountCodes.isNotEmpty
+        ? discountCodes.join(', ')
+        : 'Discount on MRP';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -664,22 +720,110 @@ class _CartSummary extends StatelessWidget {
       child: Column(
         children: [
           _SummaryRow(
-            label: 'Items (${store.cartCount})',
-            value: _formatPrice(store.cartSubtotal, currency),
+            label: 'Subtotal',
+            value: _formatPrice(subtotal, currency),
           ),
-          const SizedBox(height: 10),
-          const _SummaryRow(label: 'Shipping', value: 'Calculated at checkout'),
+          if (discount > 0) ...[
+            const SizedBox(height: 6),
+            _DiscountSummaryRow(
+              code: discountCodes.isNotEmpty ? discountLabel : null,
+              value: loading
+                  ? 'Calculating…'
+                  : failed
+                  ? 'Unavailable'
+                  : '- ${_formatPrice(discount, currency)}',
+            ),
+          ],
+          const SizedBox(height: 6),
+          const _SummaryRow(label: 'Shipping', value: 'FREE'),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 13),
             child: Divider(height: 1),
           ),
           _SummaryRow(
-            label: 'Total Price',
-            value: _formatPrice(store.cartSubtotal, currency),
+            label: 'Total',
+            value: _formatPrice(total, currency),
             emphasized: true,
+            secondaryLabel: 'Including taxes',
           ),
+          if (discount > 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.local_offer_outlined, size: 15),
+                const SizedBox(width: 5),
+                Text(
+                  'TOTAL SAVINGS ${_formatPrice(discount, currency)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _DiscountSummaryRow extends StatelessWidget {
+  const _DiscountSummaryRow({required this.value, this.code});
+
+  final String value;
+  final String? code;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Order discount',
+                style: TextStyle(color: Color(0xff665d57), fontSize: 12),
+              ),
+              if (code != null) ...[
+                const SizedBox(height: 1),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.local_offer_outlined,
+                      size: 14,
+                      color: Color(0xff8c827c),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      code!,
+                      style: const TextStyle(
+                        color: Color(0xff8c827c),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 112,
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              color: Color(0xff665d57),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -689,32 +833,51 @@ class _SummaryRow extends StatelessWidget {
     required this.label,
     required this.value,
     this.emphasized = false,
+    this.secondaryLabel,
   });
 
   final String label;
   final String value;
   final bool emphasized;
+  final String? secondaryLabel;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: emphasized ? _cartText : const Color(0xff8c827c),
-            fontSize: emphasized ? 13 : 12,
-            fontWeight: emphasized ? FontWeight.w700 : FontWeight.w400,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: emphasized ? _cartText : const Color(0xff8c827c),
+                  fontSize: emphasized ? 15 : 12,
+                  fontWeight: emphasized ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+              if (secondaryLabel != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  secondaryLabel!,
+                  style: const TextStyle(
+                    color: Color(0xff8c827c),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        const Spacer(),
-        Flexible(
+        SizedBox(
+          width: 112,
           child: Text(
             value,
-            textAlign: TextAlign.end,
+            textAlign: TextAlign.right,
             style: TextStyle(
               color: emphasized ? _cartBrown : const Color(0xff665d57),
-              fontSize: emphasized ? 13 : 11,
+              fontSize: emphasized ? 15 : 11,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -763,6 +926,6 @@ class _EmptyCart extends StatelessWidget {
 }
 
 String _formatPrice(double amount, String currencyCode) {
-  final value = amount.round().toString();
-  return currencyCode == 'INR' ? 'Rs $value' : '$currencyCode $value';
+  final value = amount.toStringAsFixed(2);
+  return currencyCode == 'INR' ? '₹$value' : '$currencyCode $value';
 }

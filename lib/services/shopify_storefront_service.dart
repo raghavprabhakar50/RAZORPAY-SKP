@@ -420,6 +420,80 @@ class ShopifyStorefrontService {
     return uri;
   }
 
+  /// Prices the same cart shape Shopify will open in hosted checkout. This
+  /// includes automatic discounts and the selected public code, while keeping
+  /// shipping separate because it is calculated at checkout.
+  Future<CheckoutPriceSummary> previewCartTotals(
+    List<CartItem> items, {
+    required String customerAccessToken,
+    String discountCode = '',
+  }) async {
+    if (customerAccessToken.isEmpty || items.isEmpty) {
+      throw StateError('Refresh your cart and sign in before pricing.');
+    }
+    final response = await _postGraphQl(
+      r'''
+      mutation PreviewCartTotals($input: CartInput!) {
+        cartCreate(input: $input) {
+          cart {
+            cost {
+              subtotalAmount { amount currencyCode }
+              totalAmount { amount currencyCode }
+            }
+            discountCodes { code applicable }
+          }
+          userErrors { message }
+          warnings { code message }
+        }
+      }
+    ''',
+      variables: {
+        'input': {
+          'buyerIdentity': {
+            'customerAccessToken': customerAccessToken,
+            'countryCode': 'IN',
+          },
+          'discountCodes': [
+            if (discountCode.trim().isNotEmpty) discountCode.trim(),
+          ],
+          'lines': items
+              .map(
+                (i) => {'merchandiseId': i.variantId, 'quantity': i.quantity},
+              )
+              .toList(),
+        },
+      },
+    ).timeout(const Duration(seconds: 25));
+    final result = response['data']?['cartCreate'];
+    final cart = result is Map ? result['cart'] : null;
+    final errors = result is Map ? result['userErrors'] as List? : null;
+    if (cart is! Map || errors?.isNotEmpty == true) {
+      throw StateError('Shopify could not calculate this cart total.');
+    }
+    final cost = cart['cost'];
+    final subtotal = cost is Map ? cost['subtotalAmount'] : null;
+    final total = cost is Map ? cost['totalAmount'] : null;
+    if (subtotal is! Map || total is! Map) {
+      throw StateError('Shopify returned an incomplete cart total.');
+    }
+    final subtotalValue = double.tryParse(subtotal['amount']?.toString() ?? '');
+    final totalValue = double.tryParse(total['amount']?.toString() ?? '');
+    final currency = total['currencyCode']?.toString() ?? '';
+    if (subtotalValue == null || totalValue == null || currency.isEmpty) {
+      throw StateError('Shopify returned an invalid cart total.');
+    }
+    return CheckoutPriceSummary(
+      subtotal: subtotalValue,
+      discount: (subtotalValue - totalValue).clamp(0, double.infinity),
+      total: totalValue,
+      currencyCode: currency,
+      discountCodes: [
+        for (final row in (cart['discountCodes'] as List? ?? const []))
+          if (row is Map && row['applicable'] == true) row['code'].toString(),
+      ],
+    );
+  }
+
   static const _cacheLifetime = Duration(minutes: 5);
   final Map<String, _StorefrontCacheEntry> _cache = {};
   final Map<String, Future<Object>> _inFlightRequests = {};

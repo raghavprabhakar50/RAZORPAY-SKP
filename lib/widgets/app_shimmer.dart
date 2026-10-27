@@ -87,7 +87,7 @@ class ShimmerBox extends StatelessWidget {
   }
 }
 
-class ShimmerNetworkImage extends StatelessWidget {
+class ShimmerNetworkImage extends StatefulWidget {
   const ShimmerNetworkImage({
     required this.url,
     this.fit = BoxFit.cover,
@@ -102,17 +102,62 @@ class ShimmerNetworkImage extends StatelessWidget {
   final ImageErrorWidgetBuilder? errorBuilder;
 
   @override
+  State<ShimmerNetworkImage> createState() => _ShimmerNetworkImageState();
+}
+
+class _ShimmerNetworkImageState extends State<ShimmerNetworkImage> {
+  int _attempt = 0;
+  bool _retryScheduled = false;
+
+  @override
+  void didUpdateWidget(covariant ShimmerNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _attempt = 0;
+      _retryScheduled = false;
+    }
+  }
+
+  void _scheduleRetry() {
+    if (_retryScheduled || _attempt >= 2) return;
+    _retryScheduled = true;
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      setState(() {
+        _attempt++;
+        _retryScheduled = false;
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Image.network(
-      optimizedShopifyImageUrl(url, maxWidth: maxWidth),
-      fit: fit,
+      key: ValueKey('${widget.url}:$_attempt'),
+      optimizedShopifyImageUrl(widget.url, maxWidth: widget.maxWidth),
+      fit: widget.fit,
       filterQuality: FilterQuality.medium,
       gaplessPlayback: true,
+      cacheWidth: widget.maxWidth,
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
         return const AppShimmer(child: ShimmerBox(borderRadius: 0));
       },
-      errorBuilder: errorBuilder,
+      errorBuilder: (context, error, stackTrace) {
+        _scheduleRetry();
+        if (widget.errorBuilder != null) {
+          return widget.errorBuilder!(context, error, stackTrace);
+        }
+        return const ColoredBox(
+          color: Color(0xfff3efeb),
+          child: Center(
+            child: Icon(
+              Icons.image_not_supported_outlined,
+              color: Color(0xffa89d95),
+            ),
+          ),
+        );
+      },
     );
   }
 }

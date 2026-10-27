@@ -54,6 +54,7 @@ class AccountStore extends ChangeNotifier {
 
   Future<void> completeAuthentication({
     required String fallbackEmail,
+    String? expectedEmail,
     String firstName = '',
     String lastName = '',
     String phone = '',
@@ -70,7 +71,15 @@ class AccountStore extends ChangeNotifier {
       localImagePath: _profile?.localImagePath,
     );
     await _persistProfile();
-    await refreshProfile(silent: true);
+    await refreshProfile();
+    final requested = (expectedEmail ?? fallbackEmail).trim().toLowerCase();
+    final returned = _profile?.email.trim().toLowerCase() ?? '';
+    if (requested.isNotEmpty && returned != requested) {
+      await signOut();
+      throw StateError(
+        'Shopify opened a different account ($returned). Sign out of the Shopify browser account and try $requested again.',
+      );
+    }
     notifyListeners();
   }
 

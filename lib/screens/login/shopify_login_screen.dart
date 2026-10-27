@@ -37,6 +37,7 @@ class _ShopifyLoginScreenState extends State<ShopifyLoginScreen> {
       if (!mounted || !success) return;
       await AccountStore.instance.completeAuthentication(
         fallbackEmail: _emailController.text,
+        expectedEmail: _emailController.text,
       );
       if (!mounted) return;
       if (widget.returnToPrevious) {
@@ -47,12 +48,12 @@ class _ShopifyLoginScreenState extends State<ShopifyLoginScreen> {
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
         (_) => false,
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Login was not completed. Please finish login in the Shopify window.',
+            error is StateError ? error.message.toString() : 'Login was not completed. Please finish login in the Shopify window.',
           ),
         ),
       );

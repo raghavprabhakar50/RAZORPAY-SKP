@@ -51,3 +51,28 @@ class CheckoutCoupon {
     return List.unmodifiable(offers.values);
   }
 }
+
+class CheckoutPriceSummary {
+  const CheckoutPriceSummary({
+    required this.subtotal,
+    required this.discount,
+    required this.total,
+    required this.currencyCode,
+    this.discountCodes = const [],
+  });
+
+  final double subtotal;
+  final double discount;
+  final double total;
+  final String currencyCode;
+  final List<String> discountCodes;
+
+  CheckoutPriceSummary copyWith({List<String>? discountCodes}) =>
+      CheckoutPriceSummary(
+        subtotal: subtotal,
+        discount: discount,
+        total: total,
+        currencyCode: currencyCode,
+        discountCodes: discountCodes ?? this.discountCodes,
+      );
+}
