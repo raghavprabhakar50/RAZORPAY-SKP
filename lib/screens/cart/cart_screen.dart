@@ -427,22 +427,11 @@ class _CartScreenState extends State<CartScreen> {
       _pricingKey = key;
       _pricing = () async {
         final token = await ShopifyAuthService().checkoutAccessToken();
-        final pricing = await storefrontService.previewCartTotals(
+        return storefrontService.previewCartTotals(
           List<CartItem>.unmodifiable(store.cart),
           customerAccessToken: token,
           discountCode: _selectedCoupon ?? '',
         );
-        if (pricing.discount <= 0 || pricing.discountCodes.isNotEmpty) {
-          return pricing;
-        }
-        final banners = await storefrontService.fetchDiscountBanners();
-        final title = banners
-            .where((banner) => banner.isVisibleAt(DateTime.now()))
-            .map((banner) => banner.discountTitle.trim())
-            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-        return title.isEmpty
-            ? pricing
-            : pricing.copyWith(discountCodes: [title]);
       }();
     }
     return _pricing!;
@@ -706,7 +695,17 @@ class _CartSummary extends StatelessWidget {
     final subtotal = store.cartSubtotal;
     final total = pricing?.total ?? subtotal;
     final discount = (subtotal - total).clamp(0.0, double.infinity).toDouble();
-    final discountCodes = pricing?.discountCodes ?? const <String>[];
+    // Only show a code that the app explicitly exposes to customers. Shopify
+    // can return an automatic discount title here; that must not be confused
+    // with a Discount Banner metaobject (for example, an old Dussehra banner).
+    final publicCodes = {
+      for (final offer in CheckoutCoupon.publicFallback)
+        offer.code.toUpperCase(),
+    };
+    final discountCodes = (pricing?.discountCodes ?? const <String>[])
+        .where((code) => publicCodes.contains(code.toUpperCase()))
+        .toList(growable: false);
+    final automaticDiscountTitle = pricing?.automaticDiscountTitle;
     final discountLabel = discountCodes.isNotEmpty
         ? discountCodes.join(', ')
         : 'Discount on MRP';
@@ -726,7 +725,9 @@ class _CartSummary extends StatelessWidget {
           if (discount > 0) ...[
             const SizedBox(height: 6),
             _DiscountSummaryRow(
-              code: discountCodes.isNotEmpty ? discountLabel : null,
+              code: discountCodes.isNotEmpty
+                  ? discountLabel
+                  : (automaticDiscountTitle ?? 'Automatic discount'),
               value: loading
                   ? 'Calculating…'
                   : failed

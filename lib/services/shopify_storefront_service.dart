@@ -441,6 +441,18 @@ class ShopifyStorefrontService {
               totalAmount { amount currencyCode }
             }
             discountCodes { code applicable }
+            discountApplications {
+              __typename
+              ... on CartAutomaticDiscountApplication { title }
+            }
+            lines(first: 100) {
+              nodes {
+                discountAllocations {
+                  __typename
+                  ... on CartAutomaticDiscountAllocation { title }
+                }
+              }
+            }
           }
           userErrors { message }
           warnings { code message }
@@ -482,6 +494,36 @@ class ShopifyStorefrontService {
     if (subtotalValue == null || totalValue == null || currency.isEmpty) {
       throw StateError('Shopify returned an invalid cart total.');
     }
+    final automaticTitles = <String>{};
+    final applications = cart['discountApplications'];
+    if (applications is List) {
+      for (final application in applications) {
+        if (application is Map &&
+            application['__typename'].toString().contains(
+              'AutomaticDiscountApplication',
+            )) {
+          final title = application['title']?.toString().trim() ?? '';
+          if (title.isNotEmpty) automaticTitles.add(title);
+        }
+      }
+    }
+    final lines = cart['lines'];
+    if (lines is Map && lines['nodes'] is List) {
+      for (final line in lines['nodes']) {
+        final allocations = line is Map ? line['discountAllocations'] : null;
+        if (allocations is List) {
+          for (final allocation in allocations) {
+            if (allocation is Map &&
+                allocation['__typename'].toString().contains(
+                  'AutomaticDiscountAllocation',
+                )) {
+              final title = allocation['title']?.toString().trim() ?? '';
+              if (title.isNotEmpty) automaticTitles.add(title);
+            }
+          }
+        }
+      }
+    }
     return CheckoutPriceSummary(
       subtotal: subtotalValue,
       discount: (subtotalValue - totalValue).clamp(0, double.infinity),
@@ -491,6 +533,9 @@ class ShopifyStorefrontService {
         for (final row in (cart['discountCodes'] as List? ?? const []))
           if (row is Map && row['applicable'] == true) row['code'].toString(),
       ],
+      automaticDiscountTitle: automaticTitles.isEmpty
+          ? null
+          : automaticTitles.join(', '),
     );
   }
 

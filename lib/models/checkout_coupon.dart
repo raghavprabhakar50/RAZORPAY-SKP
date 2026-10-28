@@ -59,6 +59,7 @@ class CheckoutPriceSummary {
     required this.total,
     required this.currencyCode,
     this.discountCodes = const [],
+    this.automaticDiscountTitle,
   });
 
   final double subtotal;
@@ -66,13 +67,18 @@ class CheckoutPriceSummary {
   final double total;
   final String currencyCode;
   final List<String> discountCodes;
+  final String? automaticDiscountTitle;
 
-  CheckoutPriceSummary copyWith({List<String>? discountCodes}) =>
-      CheckoutPriceSummary(
-        subtotal: subtotal,
-        discount: discount,
-        total: total,
-        currencyCode: currencyCode,
-        discountCodes: discountCodes ?? this.discountCodes,
-      );
+  CheckoutPriceSummary copyWith({
+    List<String>? discountCodes,
+    String? automaticDiscountTitle,
+  }) => CheckoutPriceSummary(
+    subtotal: subtotal,
+    discount: discount,
+    total: total,
+    currencyCode: currencyCode,
+    discountCodes: discountCodes ?? this.discountCodes,
+    automaticDiscountTitle:
+        automaticDiscountTitle ?? this.automaticDiscountTitle,
+  );
 }

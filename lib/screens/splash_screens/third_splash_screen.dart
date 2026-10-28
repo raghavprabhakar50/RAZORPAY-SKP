@@ -1,10 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../services/account_store.dart';
-import '../home/home_screen.dart';
 import '../login/login_screen.dart';
+import '../home/home_screen.dart';
 import 'fourth_splash_screen.dart';
 
 class ThirdSplashScreen extends StatefulWidget {
@@ -15,24 +13,7 @@ class ThirdSplashScreen extends StatefulWidget {
 }
 
 class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
-  Timer? _autoAdvanceTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _scheduleAutoAdvance();
-  }
-
-  void _scheduleAutoAdvance() {
-    _autoAdvanceTimer?.cancel();
-    _autoAdvanceTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted) return;
-      _openDestination();
-    });
-  }
-
   void _openDestination() {
-    _autoAdvanceTimer?.cancel();
     final destination = AccountStore.instance.isAuthenticated
         ? const HomeScreen()
         : const LoginScreen();
@@ -41,14 +22,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
   }
 
   void _handleNext() {
-    _autoAdvanceTimer?.cancel();
     _openDestination();
-  }
-
-  @override
-  void dispose() {
-    _autoAdvanceTimer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -57,8 +31,8 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
       onSkip: _openDestination,
       onNext: _handleNext,
       content: const OnboardingPageContent(
-        title: 'High Quality Pearl\nJewellery',
-        subtitle: 'Rings, Occasion Pieces, Pandora & More.',
+        title: 'The Nizam Of\nHyderabad',
+        subtitle: 'A Legacy Connected To The Jewellers Of',
         activePage: 0,
         showPageDots: false,
       ),

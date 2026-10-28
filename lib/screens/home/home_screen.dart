@@ -1314,16 +1314,44 @@ class _DiscountCarousel extends StatefulWidget {
 
 class _DiscountCarouselState extends State<_DiscountCarousel> {
   late final PageController _controller;
+  Timer? _timer;
   int _page = 0;
 
   @override
   void initState() {
     super.initState();
     _controller = PageController();
+    _startAutoRotation();
+  }
+
+  void _startAutoRotation() {
+    _timer?.cancel();
+    if (widget.banners.length < 2) return;
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || !_controller.hasClients || widget.banners.length < 2) {
+        return;
+      }
+      final next = (_page + 1) % widget.banners.length;
+      _controller.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _DiscountCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.banners.length != widget.banners.length) {
+      _page = 0;
+      _startAutoRotation();
+    }
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _controller.dispose();
     super.dispose();
   }
