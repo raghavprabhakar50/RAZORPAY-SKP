@@ -78,8 +78,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        const Center(child: _BrandTagline()),
                         SizedBox(height: constraints.maxHeight * .11),
                         const Text(
                           'Login / Sign Up',
@@ -123,29 +121,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _BrandTagline extends StatelessWidget {
-  const _BrandTagline();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-          color: _LoginScreenState._brown,
-          child: const Text(
-            'Budget Jewellery',
-            style: TextStyle(color: Colors.white, fontSize: 10),
-          ),
-        ),
-        const SizedBox(width: 7),
-        const Text('Starting', style: TextStyle(fontSize: 10)),
-      ],
     );
   }
 }

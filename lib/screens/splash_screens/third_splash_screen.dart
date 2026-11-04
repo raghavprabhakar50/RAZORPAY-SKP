@@ -31,8 +31,8 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
       onSkip: _openDestination,
       onNext: _handleNext,
       content: const OnboardingPageContent(
-        title: 'The Nizam Of\nHyderabad',
-        subtitle: 'A Legacy Connected To The Jewellers Of',
+        title: 'Jewellers To The\nNizam Of Hyderabad',
+        subtitle: 'A Timeless Legacy Of Royal Craftsmanship',
         activePage: 0,
         showPageDots: false,
         subtitleAboveTitle: true,
