@@ -441,10 +441,10 @@ class _CouponCheckoutService extends MiddlewareCheckoutService {
 }
 
 class _PendingCheckoutService extends _CouponCheckoutService {
-  final pending = Completer<void>();
+  final pending = Completer<Map<String, dynamic>?>();
 
   @override
-  Future<void> prepareHostedCheckout(String customer) => pending.future;
+  Future<Map<String, dynamic>?> restore(String customer) => pending.future;
 }
 
 class _ProductService extends ShopifyStorefrontService {

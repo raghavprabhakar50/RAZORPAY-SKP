@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/cart_item.dart';
 import '../../models/checkout_coupon.dart';
 import '../../models/customer_profile.dart';
 import '../../models/home_catalog.dart';
 import '../../services/account_store.dart';
+import '../../services/cart_payment_flow.dart';
 import '../../services/middleware_checkout_service.dart';
 import '../../services/razorpay_checkout.dart';
 import '../../services/shopping_store.dart';
@@ -47,6 +47,8 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   late final _service = widget.checkoutService ?? MiddlewareCheckoutService();
+  late final _gateway = widget.paymentGateway ?? RazorpayCheckout();
+  late final _paymentFlow = CartPaymentFlow(_service, _gateway);
   ShopifyStorefrontService get storefrontService => widget.storefrontService;
   bool _working = false;
   bool _openingCheckout = false;
@@ -194,6 +196,7 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void dispose() {
     _orderInstructions.dispose();
+    if (widget.paymentGateway == null) _gateway.dispose();
     if (widget.checkoutService == null) _service.close();
     super.dispose();
   }
@@ -258,15 +261,17 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
     setState(() => _openingCheckout = true);
-    await _service.prepareHostedCheckout(checkoutProfile.id);
-    if (!mounted) return;
-    setState(() => _progress = 'Open payment checkout');
     final items = List<CartItem>.unmodifiable(ShoppingStore.instance.cart);
-    final token = await ShopifyAuthService().checkoutAccessToken();
-    final checkout = await storefrontService.createWebCheckout(
+    final result = await _paymentFlow.run(
       items,
-      customerAccessToken: token,
-      orderNote: _orderInstructions.text,
+      checkoutProfile,
+      () =>
+          mounted &&
+          AccountStore.instance.isAuthenticated &&
+          AccountStore.instance.profile?.id == checkoutProfile.id,
+      (message) {
+        if (mounted) setState(() => _progress = message);
+      },
       discountCode: _selectedCoupon ?? '',
     );
     if (!mounted ||
@@ -274,12 +279,11 @@ class _CartScreenState extends State<CartScreen> {
         !AccountStore.instance.isAuthenticated) {
       return;
     }
-    final opened = await launchUrl(checkout, mode: LaunchMode.inAppBrowserView);
-    if (!opened) {
-      throw StateError('Unable to open Shopify checkout. Please try again.');
+    if (result['paid'] == true) {
+      setState(() {
+        _notice = 'Payment successful. Your order has been placed.';
+      });
     }
-    // Opening/closing a browser is not payment proof. Keep the cart intact;
-    // Shopify owns payment confirmation and existing order/webhook sync.
   }
 
   @override
