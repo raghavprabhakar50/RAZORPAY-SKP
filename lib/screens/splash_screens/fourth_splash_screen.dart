@@ -7,7 +7,7 @@ class FourthSplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return const OnboardingPageContent(
       title: 'Hyderabadi Pearls\nExude Elegance',
-      subtitle: 'Budget Jewellery Starting',
+      subtitle: '',
       activePage: 1,
     );
   }
@@ -113,6 +113,7 @@ class OnboardingPageContent extends StatelessWidget {
     required this.subtitle,
     required this.activePage,
     this.showPageDots = true,
+    this.subtitleAboveTitle = false,
     super.key,
   });
 
@@ -120,6 +121,7 @@ class OnboardingPageContent extends StatelessWidget {
   final String subtitle;
   final int activePage;
   final bool showPageDots;
+  final bool subtitleAboveTitle;
 
   static const _titleBrown = Color(0xff7d4d39);
 
@@ -143,6 +145,21 @@ class OnboardingPageContent extends StatelessWidget {
                 height: illustrationHeight,
               ),
               SizedBox(height: compact ? 24 : 38),
+              if (subtitleAboveTitle) ...[
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xff60534d),
+                    fontFamily: 'Poppins',
+                    fontSize: 16,
+                    height: 1,
+                    letterSpacing: 0,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               Text(
                 title,
                 textAlign: TextAlign.center,
@@ -155,19 +172,21 @@ class OnboardingPageContent extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 14),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xff60534d),
-                  fontFamily: 'Poppins',
-                  fontSize: 16,
-                  height: 1,
-                  letterSpacing: 0,
-                  fontWeight: FontWeight.w400,
+              if (!subtitleAboveTitle) ...[
+                const SizedBox(height: 14),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xff60534d),
+                    fontFamily: 'Poppins',
+                    fontSize: 16,
+                    height: 1,
+                    letterSpacing: 0,
+                    fontWeight: FontWeight.w400,
+                  ),
                 ),
-              ),
+              ],
               SizedBox(height: compact ? 17 : 23),
               if (showPageDots) _PageDots(activePage: activePage),
             ],

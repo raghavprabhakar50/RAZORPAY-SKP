@@ -48,6 +48,18 @@ class ShopifyConfig {
 
   static const mobileApiToken = String.fromEnvironment('SKP_MOBILE_API_TOKEN');
 
+  /// Store prices are tax-inclusive. Shopify Storefront Cart exposes the
+  /// inclusive total but not the tax component, so keep the merchant GST rate
+  /// configurable at build time.
+  static final includedTaxRate =
+      double.tryParse(
+        const String.fromEnvironment(
+          'SHOPIFY_INCLUDED_TAX_RATE',
+          defaultValue: '0.03',
+        ),
+      ) ??
+      0.03;
+
   static const customerScopes = <String>[
     'openid',
     'email',

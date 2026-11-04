@@ -427,6 +427,7 @@ class ShopifyStorefrontService {
     List<CartItem> items, {
     required String customerAccessToken,
     String discountCode = '',
+    Map<String, String>? deliveryAddress,
   }) async {
     if (customerAccessToken.isEmpty || items.isEmpty) {
       throw StateError('Refresh your cart and sign in before pricing.');
@@ -440,6 +441,14 @@ class ShopifyStorefrontService {
               subtotalAmount { amount currencyCode }
               totalAmount { amount currencyCode }
             }
+            deliveryGroups(first: 10) {
+              nodes {
+                selectedDeliveryOption {
+                  title
+                  estimatedCost { amount currencyCode }
+                }
+              }
+            }
             discountCodes { code applicable }
             discountApplications {
               __typename
@@ -447,6 +456,10 @@ class ShopifyStorefrontService {
             }
             lines(first: 100) {
               nodes {
+                quantity
+                merchandise {
+                  ... on ProductVariant { id availableForSale quantityAvailable }
+                }
                 discountAllocations {
                   __typename
                   ... on CartAutomaticDiscountAllocation { title }
@@ -465,6 +478,16 @@ class ShopifyStorefrontService {
             'customerAccessToken': customerAccessToken,
             'countryCode': 'IN',
           },
+          if (deliveryAddress != null && deliveryAddress.isNotEmpty)
+            'delivery': {
+              'addresses': [
+                {
+                  'selected': true,
+                  'oneTimeUse': true,
+                  'address': {'deliveryAddress': deliveryAddress},
+                },
+              ],
+            },
           'discountCodes': [
             if (discountCode.trim().isNotEmpty) discountCode.trim(),
           ],
@@ -493,6 +516,47 @@ class ShopifyStorefrontService {
     final currency = total['currencyCode']?.toString() ?? '';
     if (subtotalValue == null || totalValue == null || currency.isEmpty) {
       throw StateError('Shopify returned an invalid cart total.');
+    }
+    final expectedLines = <String, int>{};
+    for (final item in items) {
+      final variantId = item.variantId;
+      if (variantId == null || item.quantity < 1) {
+        throw StateError('Refresh your cart before checking its total.');
+      }
+      expectedLines.update(
+        variantId,
+        (quantity) => quantity + item.quantity,
+        ifAbsent: () => item.quantity,
+      );
+    }
+    final actualLines = <String, int>{};
+    final pricedLines = cart['lines'];
+    if (pricedLines is! Map || pricedLines['nodes'] is! List) {
+      throw StateError('Shopify returned an incomplete cart total.');
+    }
+    for (final line in pricedLines['nodes'] as List) {
+      final merchandise = line is Map ? line['merchandise'] : null;
+      final quantity = line is Map ? line['quantity'] : null;
+      if (merchandise is! Map ||
+          merchandise['id'] is! String ||
+          merchandise['availableForSale'] != true ||
+          quantity is! int ||
+          quantity < 1) {
+        throw StateError('An item is unavailable. Refresh your cart.');
+      }
+      actualLines.update(
+        merchandise['id'] as String,
+        (current) => current + quantity,
+        ifAbsent: () => quantity,
+      );
+    }
+    if (actualLines.length != expectedLines.length ||
+        expectedLines.entries.any(
+          (entry) => actualLines[entry.key] != entry.value,
+        )) {
+      throw StateError(
+        'Shopify could not price the requested quantity. Reduce it and retry.',
+      );
     }
     final automaticTitles = <String>{};
     final applications = cart['discountApplications'];
@@ -524,11 +588,45 @@ class ShopifyStorefrontService {
         }
       }
     }
+    double? shipping;
+    final deliveryGroups = cart['deliveryGroups'];
+    final deliveryNodes = deliveryGroups is Map
+        ? deliveryGroups['nodes']
+        : null;
+    if (deliveryNodes is List && deliveryNodes.isNotEmpty) {
+      var totalShipping = 0.0;
+      var completeShipping = true;
+      for (final group in deliveryNodes) {
+        final selected = group is Map ? group['selectedDeliveryOption'] : null;
+        final estimated = selected is Map ? selected['estimatedCost'] : null;
+        final amount = estimated is Map
+            ? double.tryParse(estimated['amount']?.toString() ?? '')
+            : null;
+        if (amount == null) {
+          completeShipping = false;
+          break;
+        }
+        totalShipping += amount;
+      }
+      if (completeShipping) shipping = totalShipping;
+    }
+    final discount = (subtotalValue + (shipping ?? 0) - totalValue)
+        .clamp(0, double.infinity)
+        .toDouble();
+    final taxableTotal = (totalValue - (shipping ?? 0))
+        .clamp(0, double.infinity)
+        .toDouble();
+    final taxRate = ShopifyConfig.includedTaxRate;
+    final includedTax = taxRate > 0
+        ? taxableTotal * taxRate / (1 + taxRate)
+        : 0.0;
     return CheckoutPriceSummary(
       subtotal: subtotalValue,
-      discount: (subtotalValue - totalValue).clamp(0, double.infinity),
+      discount: discount,
       total: totalValue,
       currencyCode: currency,
+      shipping: shipping,
+      includedTax: includedTax,
       discountCodes: [
         for (final row in (cart['discountCodes'] as List? ?? const []))
           if (row is Map && row['applicable'] == true) row['code'].toString(),
@@ -537,6 +635,55 @@ class ShopifyStorefrontService {
           ? null
           : automaticTitles.join(', '),
     );
+  }
+
+  /// Shopify's Storefront variant inventory count does not expose the Admin
+  /// `inventoryPolicy`. Probe the requested quantity with an isolated cart so
+  /// `CONTINUE` variants can be oversold while `DENY` variants remain capped.
+  Future<bool> acceptsVariantQuantity(CartItem item, int quantity) async {
+    final variantId = item.variantId;
+    if (variantId == null || quantity < 1 || quantity > 20) return false;
+    final response = await _postGraphQl(
+      r'''
+      mutation CheckVariantQuantity($input: CartInput!) {
+        cartCreate(input: $input) {
+          cart {
+            lines(first: 10) {
+              nodes {
+                quantity
+                merchandise {
+                  ... on ProductVariant { id availableForSale }
+                }
+              }
+            }
+          }
+          userErrors { message }
+          warnings { code message }
+        }
+      }
+    ''',
+      variables: {
+        'input': {
+          'buyerIdentity': {'countryCode': 'IN'},
+          'lines': [
+            {'merchandiseId': variantId, 'quantity': quantity},
+          ],
+        },
+      },
+    ).timeout(const Duration(seconds: 15));
+    final result = response['data']?['cartCreate'];
+    if (result is! Map || (result['userErrors'] as List?)?.isNotEmpty == true) {
+      return false;
+    }
+    final nodes = result['cart']?['lines']?['nodes'];
+    if (nodes is! List || nodes.length != 1) return false;
+    final line = nodes.single;
+    final merchandise = line is Map ? line['merchandise'] : null;
+    return line is Map &&
+        line['quantity'] == quantity &&
+        merchandise is Map &&
+        merchandise['id'] == variantId &&
+        merchandise['availableForSale'] == true;
   }
 
   static const _cacheLifetime = Duration(minutes: 5);
@@ -748,6 +895,7 @@ class ShopifyStorefrontService {
             id
             title
             availableForSale
+            quantityAvailable
             price { amount currencyCode }
             compareAtPrice { amount currencyCode }
             image { url altText }
@@ -836,6 +984,7 @@ class ShopifyStorefrontService {
                 id
                 title
                 availableForSale
+                quantityAvailable
                 price { amount currencyCode }
                 compareAtPrice { amount currencyCode }
                 image { url altText }

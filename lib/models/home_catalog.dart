@@ -373,6 +373,7 @@ class StorefrontProductVariant {
     required this.currencyCode,
     required this.availableForSale,
     required this.selectedOptions,
+    this.quantityAvailable,
     this.compareAtAmount,
     this.imageUrl,
   });
@@ -383,6 +384,7 @@ class StorefrontProductVariant {
   final String currencyCode;
   final double? compareAtAmount;
   final bool availableForSale;
+  final int? quantityAvailable;
   final Map<String, String> selectedOptions;
   final String? imageUrl;
 
@@ -412,6 +414,7 @@ class StorefrontProductVariant {
         compareAtData?['amount']?.toString() ?? '',
       ),
       availableForSale: node['availableForSale'] as bool? ?? false,
+      quantityAvailable: (node['quantityAvailable'] as num?)?.toInt(),
       selectedOptions: Map.unmodifiable(selectedOptions),
       imageUrl: StorefrontProduct._optionalString(imageData?['url']),
     );

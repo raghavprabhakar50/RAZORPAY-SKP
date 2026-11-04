@@ -145,6 +145,13 @@ class ShoppingStore extends ChangeNotifier {
     _commit();
   }
 
+  void replaceCartItem(String key, CartItem replacement) {
+    if (!_cart.any((item) => item.key == key)) return;
+    _changedBeforeLoad = true;
+    _cartState.replace(key, replacement);
+    _commit();
+  }
+
   void _commit() {
     notifyListeners();
     if (!_initialized) return; // Don't overwrite disk before restore/replay.

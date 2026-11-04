@@ -82,6 +82,15 @@ class AccountCartState {
     _change(() => _carts[owner]?.removeWhere((v) => v.key == key));
   }
 
+  void replace(String key, CartItem replacement) {
+    final owner = _owner;
+    _change(() {
+      final cart = _carts[owner] ?? [];
+      final index = cart.indexWhere((item) => item.key == key);
+      if (index >= 0) cart[index] = replacement;
+    });
+  }
+
   void restore(Map<String, dynamic> saved) {
     if (_loaded) return;
     _carts.clear();

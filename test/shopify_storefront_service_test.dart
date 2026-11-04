@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sri_krishna_pearls_mobile/config/shopify_config.dart';
+import 'package:sri_krishna_pearls_mobile/models/cart_item.dart';
 import 'package:sri_krishna_pearls_mobile/models/home_catalog.dart';
 import 'package:sri_krishna_pearls_mobile/services/shopify_storefront_service.dart';
 
@@ -517,6 +518,241 @@ void main() {
       expect(products.single.title, 'Freshwater Pearl Necklace');
       expect(products.single.amount, 3499);
       expect(products.single.compareAtAmount, 3999);
+    },
+  );
+
+  test('previewCartTotals rejects a Shopify-trimmed cart quantity', () async {
+    const variantId = 'gid://shopify/ProductVariant/50651354824842';
+    final client = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final variables = body['variables'] as Map<String, dynamic>;
+      final input = variables['input'] as Map<String, dynamic>;
+      final lines = input['lines'] as List<dynamic>;
+      expect(lines.single, {'merchandiseId': variantId, 'quantity': 4});
+
+      return http.Response(
+        jsonEncode({
+          'data': {
+            'cartCreate': {
+              'cart': {
+                'cost': {
+                  'subtotalAmount': {
+                    'amount': '31999.00',
+                    'currencyCode': 'INR',
+                  },
+                  'totalAmount': {'amount': '25599.20', 'currencyCode': 'INR'},
+                },
+                'discountCodes': <dynamic>[],
+                'discountApplications': <dynamic>[],
+                'lines': {
+                  'nodes': [
+                    {
+                      'quantity': 1,
+                      'merchandise': {
+                        'id': variantId,
+                        'availableForSale': true,
+                        'quantityAvailable': 1,
+                      },
+                      'discountAllocations': <dynamic>[],
+                    },
+                  ],
+                },
+              },
+              'userErrors': <dynamic>[],
+              'warnings': <dynamic>[],
+            },
+          },
+        }),
+        200,
+      );
+    });
+
+    const item = CartItem(
+      key: 'nizami',
+      productId: 'gid://shopify/Product/1',
+      productHandle: 'nizami-pearls-with-real-ruby-necklace-set',
+      title: 'Nizami Pearls with Real Ruby Necklace Set',
+      variantId: variantId,
+      unitPrice: 31999,
+      currencyCode: 'INR',
+      quantity: 4,
+      availableForSale: true,
+    );
+
+    expect(
+      ShopifyStorefrontService(
+        client: client,
+      ).previewCartTotals(const [item], customerAccessToken: 'customer-token'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('requested quantity'),
+        ),
+      ),
+    );
+  });
+
+  test('acceptsVariantQuantity allows Shopify CONTINUE inventory', () async {
+    const variantId = 'gid://shopify/ProductVariant/50651354824842';
+    final client = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['variables'], {
+        'input': {
+          'buyerIdentity': {'countryCode': 'IN'},
+          'lines': [
+            {'merchandiseId': variantId, 'quantity': 2},
+          ],
+        },
+      });
+      return http.Response(
+        jsonEncode({
+          'data': {
+            'cartCreate': {
+              'cart': {
+                'lines': {
+                  'nodes': [
+                    {
+                      'quantity': 2,
+                      'merchandise': {
+                        'id': variantId,
+                        'availableForSale': true,
+                      },
+                    },
+                  ],
+                },
+              },
+              'warnings': <dynamic>[],
+              'userErrors': <dynamic>[],
+            },
+          },
+        }),
+        200,
+      );
+    });
+    const item = CartItem(
+      key: 'nizami',
+      productId: 'gid://shopify/Product/1',
+      productHandle: 'nizami-pearls-with-real-ruby-necklace-set',
+      title: 'Nizami Pearls with Real Ruby Necklace Set',
+      variantId: variantId,
+      unitPrice: 31999,
+      currencyCode: 'INR',
+      quantity: 1,
+      availableForSale: true,
+      quantityAvailable: 1,
+    );
+
+    expect(
+      await ShopifyStorefrontService(client: client)
+          .acceptsVariantQuantity(item, 2),
+      isTrue,
+    );
+  });
+
+  test(
+    'previewCartTotals includes Shopify shipping and included tax',
+    () async {
+      const variantId = 'gid://shopify/ProductVariant/47311834808458';
+      final client = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final variables = body['variables'] as Map<String, dynamic>;
+        final input = variables['input'] as Map<String, dynamic>;
+        expect(input['delivery'], {
+          'addresses': [
+            {
+              'selected': true,
+              'oneTimeUse': true,
+              'address': {
+                'deliveryAddress': {
+                  'address1': 'Charminar',
+                  'city': 'Hyderabad',
+                  'provinceCode': 'TS',
+                  'zip': '500001',
+                  'countryCode': 'IN',
+                },
+              },
+            },
+          ],
+        });
+        return http.Response(
+          jsonEncode({
+            'data': {
+              'cartCreate': {
+                'cart': {
+                  'cost': {
+                    'subtotalAmount': {
+                      'amount': '499.00',
+                      'currencyCode': 'INR',
+                    },
+                    'totalAmount': {'amount': '699.00', 'currencyCode': 'INR'},
+                  },
+                  'discountCodes': <dynamic>[],
+                  'discountApplications': <dynamic>[],
+                  'deliveryGroups': {
+                    'nodes': [
+                      {
+                        'selectedDeliveryOption': {
+                          'title': 'Standard',
+                          'estimatedCost': {
+                            'amount': '200.00',
+                            'currencyCode': 'INR',
+                          },
+                        },
+                      },
+                    ],
+                  },
+                  'lines': {
+                    'nodes': [
+                      {
+                        'quantity': 1,
+                        'merchandise': {
+                          'id': variantId,
+                          'availableForSale': true,
+                          'quantityAvailable': 10,
+                        },
+                        'discountAllocations': <dynamic>[],
+                      },
+                    ],
+                  },
+                },
+                'warnings': <dynamic>[],
+                'userErrors': <dynamic>[],
+              },
+            },
+          }),
+          200,
+        );
+      });
+      const item = CartItem(
+        key: 'studs',
+        productId: 'gid://shopify/Product/2',
+        productHandle: 'beautiful-brown-pearl-studds',
+        title: 'Beautiful Brown Pearl Studds',
+        variantId: variantId,
+        unitPrice: 499,
+        currencyCode: 'INR',
+        quantity: 1,
+        availableForSale: true,
+      );
+
+      final summary = await ShopifyStorefrontService(client: client)
+          .previewCartTotals(
+            const [item],
+            customerAccessToken: 'customer-token',
+            deliveryAddress: const {
+              'address1': 'Charminar',
+              'city': 'Hyderabad',
+              'provinceCode': 'TS',
+              'zip': '500001',
+              'countryCode': 'IN',
+            },
+          );
+
+      expect(summary.shipping, 200);
+      expect(summary.total, 699);
+      expect(summary.discount, 0);
+      expect(summary.includedTax, closeTo(14.53, 0.01));
     },
   );
 }

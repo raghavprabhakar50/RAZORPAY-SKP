@@ -10,6 +10,7 @@ class CartItem {
     required this.currencyCode,
     required this.quantity,
     required this.availableForSale,
+    this.quantityAvailable,
     this.variantId,
     this.variantTitle,
     this.imageUrl,
@@ -31,6 +32,7 @@ class CartItem {
   final String currencyCode;
   final int quantity;
   final bool availableForSale;
+  final int? quantityAvailable;
   final String? productType;
   final String giftCard;
   final String giftMessage;
@@ -41,7 +43,8 @@ class CartItem {
     required String giftCard,
     required String giftMessage,
   }) {
-    final variantId = variant?.id ?? product.firstVariantId;
+    final selectedVariant = variant ?? _defaultVariant(product);
+    final variantId = selectedVariant?.id ?? product.firstVariantId;
     final normalizedGiftCard = _normalizeGiftCard(giftCard);
     final normalizedGiftMessage = normalizedGiftCard == 'Not Required'
         ? ''
@@ -57,17 +60,27 @@ class CartItem {
       productHandle: product.handle,
       title: product.title,
       variantId: variantId,
-      variantTitle: variant?.title,
-      imageUrl: variant?.imageUrl ?? product.imageUrl,
-      unitPrice: variant?.amount ?? product.amount,
-      compareAtAmount: variant?.compareAtAmount ?? product.compareAtAmount,
-      currencyCode: variant?.currencyCode ?? product.currencyCode,
+      variantTitle: selectedVariant?.title,
+      imageUrl: selectedVariant?.imageUrl ?? product.imageUrl,
+      unitPrice: selectedVariant?.amount ?? product.amount,
+      compareAtAmount:
+          selectedVariant?.compareAtAmount ?? product.compareAtAmount,
+      currencyCode: selectedVariant?.currencyCode ?? product.currencyCode,
       quantity: 1,
-      availableForSale: variant?.availableForSale ?? product.availableForSale,
+      availableForSale:
+          selectedVariant?.availableForSale ?? product.availableForSale,
+      quantityAvailable: selectedVariant?.quantityAvailable,
       productType: product.productType,
       giftCard: normalizedGiftCard,
       giftMessage: normalizedGiftMessage,
     );
+  }
+
+  static StorefrontProductVariant? _defaultVariant(StorefrontProduct product) {
+    for (final variant in product.variants) {
+      if (variant.id == product.firstVariantId) return variant;
+    }
+    return product.variants.isEmpty ? null : product.variants.first;
   }
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
@@ -95,6 +108,7 @@ class CartItem {
       currencyCode: json['currencyCode']?.toString() ?? 'INR',
       quantity: (json['quantity'] as num?)?.toInt() ?? 1,
       availableForSale: json['availableForSale'] as bool? ?? true,
+      quantityAvailable: (json['quantityAvailable'] as num?)?.toInt(),
       productType: json['productType']?.toString(),
       giftCard: giftCard,
       giftMessage: giftMessage,
@@ -137,7 +151,12 @@ class CartItem {
     );
   }
 
-  CartItem copyWith({int? quantity, String? giftCard, String? giftMessage}) {
+  CartItem copyWith({
+    int? quantity,
+    int? quantityAvailable,
+    String? giftCard,
+    String? giftMessage,
+  }) {
     return CartItem(
       key: key,
       productId: productId,
@@ -151,6 +170,7 @@ class CartItem {
       currencyCode: currencyCode,
       quantity: quantity ?? this.quantity,
       availableForSale: availableForSale,
+      quantityAvailable: quantityAvailable ?? this.quantityAvailable,
       productType: productType,
       giftCard: giftCard ?? this.giftCard,
       giftMessage: giftMessage ?? this.giftMessage,
@@ -170,6 +190,7 @@ class CartItem {
     'currencyCode': currencyCode,
     'quantity': quantity,
     'availableForSale': availableForSale,
+    'quantityAvailable': quantityAvailable,
     'productType': productType,
     'giftCard': giftCard,
     'giftMessage': giftMessage,

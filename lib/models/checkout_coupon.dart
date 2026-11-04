@@ -18,8 +18,7 @@ class CheckoutCoupon {
     CheckoutCoupon(
       code: 'SKP5',
       title: 'Website coupon',
-      description:
-          'Eligibility and discount are verified by Shopify at checkout.',
+      description: '5% off entire order • Minimum purchase of ₹1,500.00',
     ),
   ];
 
@@ -58,6 +57,8 @@ class CheckoutPriceSummary {
     required this.discount,
     required this.total,
     required this.currencyCode,
+    this.shipping,
+    this.includedTax,
     this.discountCodes = const [],
     this.automaticDiscountTitle,
   });
@@ -66,17 +67,23 @@ class CheckoutPriceSummary {
   final double discount;
   final double total;
   final String currencyCode;
+  final double? shipping;
+  final double? includedTax;
   final List<String> discountCodes;
   final String? automaticDiscountTitle;
 
   CheckoutPriceSummary copyWith({
     List<String>? discountCodes,
     String? automaticDiscountTitle,
+    double? shipping,
+    double? includedTax,
   }) => CheckoutPriceSummary(
     subtotal: subtotal,
     discount: discount,
     total: total,
     currencyCode: currencyCode,
+    shipping: shipping ?? this.shipping,
+    includedTax: includedTax ?? this.includedTax,
     discountCodes: discountCodes ?? this.discountCodes,
     automaticDiscountTitle:
         automaticDiscountTitle ?? this.automaticDiscountTitle,

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/cart_item.dart';
 import '../../models/checkout_coupon.dart';
+import '../../models/customer_profile.dart';
+import '../../models/home_catalog.dart';
 import '../../services/account_store.dart';
 import '../../services/middleware_checkout_service.dart';
 import '../../services/razorpay_checkout.dart';
@@ -55,6 +59,113 @@ class _CartScreenState extends State<CartScreen> {
   String? _couponCart;
   String? _pricingKey;
   Future<CheckoutPriceSummary>? _pricing;
+  bool _refreshingInventory = false;
+  final Set<String> _checkingStock = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_refreshCartInventory()),
+    );
+  }
+
+  Future<void> _refreshCartInventory() async {
+    if (_refreshingInventory) return;
+    _refreshingInventory = true;
+    var adjusted = false;
+    try {
+      final store = ShoppingStore.instance;
+      final original = List<CartItem>.unmodifiable(store.cart);
+      for (final item in original) {
+        final product = await storefrontService.fetchProduct(
+          item.productHandle,
+        );
+        StorefrontProductVariant? liveVariant;
+        for (final variant in product.variants) {
+          if (variant.id == item.variantId) {
+            liveVariant = variant;
+            break;
+          }
+        }
+        if (liveVariant == null) continue;
+        final available = liveVariant.quantityAvailable;
+        var quantity = item.quantity;
+        if (available != null && available > 0 && item.quantity > available) {
+          final accepted = await storefrontService.acceptsVariantQuantity(
+            item,
+            item.quantity,
+          );
+          if (!accepted) quantity = available;
+        }
+        if (quantity != item.quantity || available != item.quantityAvailable) {
+          final replacement = CartItem.fromProduct(
+            product: product,
+            variant: liveVariant,
+            giftCard: item.giftCard,
+            giftMessage: item.giftMessage,
+          ).copyWith(quantity: quantity);
+          store.replaceCartItem(item.key, replacement);
+          adjusted = adjusted || quantity != item.quantity;
+        }
+      }
+      if (adjusted && mounted) {
+        setState(() {
+          _notice = 'Cart quantity updated to current Shopify stock.';
+          _pricingKey = null;
+          _pricing = null;
+          _coupons = null;
+        });
+      }
+    } catch (_) {
+      // Normal Shopify pricing and checkout validation remain authoritative.
+    } finally {
+      _refreshingInventory = false;
+    }
+  }
+
+  Future<void> _incrementQuantity(CartItem item) async {
+    final available = item.quantityAvailable;
+    if (available == null || item.quantity < available) {
+      ShoppingStore.instance.incrementCartItem(item.key);
+      return;
+    }
+    if (_checkingStock.contains(item.key)) return;
+    setState(() => _checkingStock.add(item.key));
+    try {
+      final accepted = await storefrontService.acceptsVariantQuantity(
+        item,
+        item.quantity + 1,
+      );
+      if (!mounted) return;
+      if (accepted) {
+        ShoppingStore.instance.incrementCartItem(item.key);
+        return;
+      }
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Out of stock for more quantity. Only $available available.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Unable to verify stock. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _checkingStock.remove(item.key));
+    }
+  }
 
   Future<void> _begin(BuildContext context) async {
     if (_working) return;
@@ -204,6 +315,8 @@ class _CartScreenState extends State<CartScreen> {
           final customer = AccountStore.instance.isAuthenticated
               ? AccountStore.instance.profile?.id
               : null;
+          final deliverySignature =
+              AccountStore.instance.profile?.formattedAddress ?? '';
           final cartSignature = store.cart
               .map((i) => '${i.key}:${i.quantity}:${i.variantId}')
               .join('|');
@@ -216,16 +329,35 @@ class _CartScreenState extends State<CartScreen> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
             children: [
-              ...store.cart.map((item) => _CartLineCard(item: item)),
+              ...store.cart.map(
+                (item) => _CartLineCard(
+                  item: item,
+                  checkingStock: _checkingStock.contains(item.key),
+                  onIncrement: () => unawaited(_incrementQuantity(item)),
+                ),
+              ),
               const SizedBox(height: 16),
               FutureBuilder<CheckoutPriceSummary>(
-                future: _pricingFuture(store, customer, cartSignature),
-                builder: (context, snapshot) => _CartSummary(
-                  store: store,
-                  pricing: snapshot.data,
-                  loading: !snapshot.hasData && !snapshot.hasError,
-                  failed: snapshot.hasError,
+                key: ValueKey(
+                  'pricing:$customer:$cartSignature:$deliverySignature:${_selectedCoupon ?? ''}',
                 ),
+                future: _pricingFuture(
+                  store,
+                  customer,
+                  cartSignature,
+                  deliverySignature,
+                ),
+                builder: (context, snapshot) {
+                  final complete =
+                      snapshot.connectionState == ConnectionState.done &&
+                      !snapshot.hasError;
+                  return _CartSummary(
+                    store: store,
+                    pricing: complete ? snapshot.data : null,
+                    loading: snapshot.connectionState != ConnectionState.done,
+                    failed: snapshot.hasError,
+                  );
+                },
               ),
               const SizedBox(height: 16),
               if (AccountStore.instance.isAuthenticated) ...[
@@ -421,8 +553,10 @@ class _CartScreenState extends State<CartScreen> {
     ShoppingStore store,
     String? customer,
     String cartSignature,
+    String deliverySignature,
   ) {
-    final key = '$customer:$cartSignature:${_selectedCoupon ?? ''}';
+    final key =
+        '$customer:$cartSignature:$deliverySignature:${_selectedCoupon ?? ''}';
     if (_pricingKey != key || _pricing == null) {
       _pricingKey = key;
       _pricing = () async {
@@ -431,21 +565,48 @@ class _CartScreenState extends State<CartScreen> {
           List<CartItem>.unmodifiable(store.cart),
           customerAccessToken: token,
           discountCode: _selectedCoupon ?? '',
+          deliveryAddress: _deliveryAddress(AccountStore.instance.profile),
         );
       }();
     }
     return _pricing!;
   }
+
+  Map<String, String>? _deliveryAddress(CustomerProfile? profile) {
+    if (profile == null || !profile.isCheckoutReady) return null;
+    final address2 = [
+      profile.address2.trim(),
+      profile.address3.trim(),
+    ].where((line) => line.isNotEmpty).join(', ');
+    return {
+      'address1': profile.address1.trim(),
+      if (address2.isNotEmpty) 'address2': address2,
+      'city': profile.city.trim(),
+      'provinceCode': profile.zoneCode.trim(),
+      'zip': profile.zip.trim(),
+      'countryCode': profile.countryCode.trim().toUpperCase(),
+      'firstName': profile.firstName.trim(),
+      'lastName': profile.lastName.trim(),
+      if (profile.phone.trim().isNotEmpty) 'phone': profile.phone.trim(),
+    };
+  }
 }
 
 class _CartLineCard extends StatelessWidget {
-  const _CartLineCard({required this.item});
+  const _CartLineCard({
+    required this.item,
+    required this.checkingStock,
+    required this.onIncrement,
+  });
 
   final CartItem item;
+  final bool checkingStock;
+  final VoidCallback onIncrement;
 
   @override
   Widget build(BuildContext context) {
     final store = ShoppingStore.instance;
+    final stockAvailable = item.quantityAvailable;
     final hasGiftCard =
         item.giftCard.trim().isNotEmpty && item.giftCard != 'Not Required';
     final hasGiftMessage = item.giftMessage.trim().isNotEmpty;
@@ -540,6 +701,19 @@ class _CartLineCard extends StatelessWidget {
                         fontSize: 11,
                       ),
                     ),
+                  if (stockAvailable != null &&
+                      stockAvailable >= 2 &&
+                      stockAvailable <= 5) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Only $stockAvailable left in stock',
+                      style: const TextStyle(
+                        color: Color(0xffc05f32),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                   if (hasGiftCard || hasGiftMessage) ...[
                     const SizedBox(height: 6),
                     Container(
@@ -605,7 +779,11 @@ class _CartLineCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      _QuantityControl(item: item),
+                      _QuantityControl(
+                        item: item,
+                        checkingStock: checkingStock,
+                        onIncrement: onIncrement,
+                      ),
                     ],
                   ),
                 ],
@@ -625,9 +803,15 @@ class _CartLineCard extends StatelessWidget {
 }
 
 class _QuantityControl extends StatelessWidget {
-  const _QuantityControl({required this.item});
+  const _QuantityControl({
+    required this.item,
+    required this.checkingStock,
+    required this.onIncrement,
+  });
 
   final CartItem item;
+  final bool checkingStock;
+  final VoidCallback onIncrement;
 
   @override
   Widget build(BuildContext context) {
@@ -665,8 +849,14 @@ class _QuantityControl extends StatelessWidget {
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-            onPressed: () => store.incrementCartItem(item.key),
-            icon: const Icon(Icons.add, size: 17),
+            onPressed: checkingStock ? null : onIncrement,
+            icon: checkingStock
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add, size: 17),
           ),
         ],
       ),
@@ -692,9 +882,14 @@ class _CartSummary extends StatelessWidget {
     final currency = pricing?.currencyCode ?? store.cart.first.currencyCode;
     // The app price is the subtotal; Shopify's preview total already includes
     // automatic/code discounts. The difference is the customer's saving.
-    final subtotal = store.cartSubtotal;
+    // A pricing response belongs to this exact cart signature (the
+    // FutureBuilder above is keyed by it). Never subtract an old Shopify total
+    // from a newly changed local subtotal.
+    final subtotal = pricing?.subtotal ?? store.cartSubtotal;
     final total = pricing?.total ?? subtotal;
-    final discount = (subtotal - total).clamp(0.0, double.infinity).toDouble();
+    final discount = pricing?.discount ?? 0;
+    final shipping = pricing?.shipping;
+    final includedTax = pricing?.includedTax;
     // Only show a code that the app explicitly exposes to customers. Shopify
     // can return an automatic discount title here; that must not be confused
     // with a Discount Banner metaobject (for example, an old Dussehra banner).
@@ -736,7 +931,16 @@ class _CartSummary extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 6),
-          const _SummaryRow(label: 'Shipping', value: 'FREE'),
+          _SummaryRow(
+            label: 'Shipping',
+            value: loading
+                ? 'Calculating…'
+                : shipping == null
+                ? 'At checkout'
+                : shipping == 0
+                ? 'FREE'
+                : _formatPrice(shipping, currency),
+          ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 13),
             child: Divider(height: 1),
@@ -745,7 +949,9 @@ class _CartSummary extends StatelessWidget {
             label: 'Total',
             value: _formatPrice(total, currency),
             emphasized: true,
-            secondaryLabel: 'Including taxes',
+            secondaryLabel: includedTax == null
+                ? 'Including taxes'
+                : 'Including ${_formatPrice(includedTax, currency)} in taxes',
           ),
           if (discount > 0) ...[
             const SizedBox(height: 8),

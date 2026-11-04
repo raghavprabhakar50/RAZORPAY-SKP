@@ -35,6 +35,7 @@ class _ThirdSplashScreenState extends State<ThirdSplashScreen> {
         subtitle: 'A Legacy Connected To The Jewellers Of',
         activePage: 0,
         showPageDots: false,
+        subtitleAboveTitle: true,
       ),
     );
   }
