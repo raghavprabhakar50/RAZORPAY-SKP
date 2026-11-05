@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "839237303538",
+    "project_id": "sri-krishna-pearls",
+    "storage_bucket": "sri-krishna-pearls.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:839237303538:android:40d33ce87ce84e5787e46b",
+        "android_client_info": {
+          "package_name": "com.srikrishnapearls.sri_krishna_pearls_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA61g5_xPfnbGuNxgyy_eg5PyUJ81CLvA4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

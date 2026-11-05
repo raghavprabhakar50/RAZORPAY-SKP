@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'screens/splash_screens/first_splash_screen.dart';
 import 'services/account_store.dart';
+import 'services/push_notification_service.dart';
 import 'services/shopping_store.dart';
 
 void main() {
@@ -20,6 +21,7 @@ void main() {
   );
   unawaited(AccountStore.instance.initialize());
   unawaited(ShoppingStore.instance.initialize());
+  unawaited(PushNotificationService.instance.initialize());
   runApp(const MyApp());
 }
 
