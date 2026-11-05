@@ -1149,6 +1149,10 @@ class ShopifyStorefrontService {
     });
   }
 
+  void invalidateProductCache(String handle) {
+    _cache.remove('product:$handle');
+  }
+
   Future<List<StorefrontProduct>> fetchRelatedProducts(String productId) {
     return _cached('related-products:$productId', () async {
       final payload = await _postGraphQl(

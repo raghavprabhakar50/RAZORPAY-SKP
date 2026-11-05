@@ -5,6 +5,11 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../models/customer_profile.dart';
 
+/// Raised when the customer explicitly closes/cancels the Razorpay sheet.
+class CheckoutCancelled extends StateError {
+  CheckoutCancelled() : super('Payment cancelled.');
+}
+
 class RazorpayCheckout {
   Razorpay? _sdk;
   Completer<Map<String, String>>? _pending;
@@ -92,12 +97,15 @@ class RazorpayCheckout {
           });
         }
       })
-      ..on(
-        Razorpay.EVENT_PAYMENT_ERROR,
-        (PaymentFailureResponse r) => _fail(
-          'Payment cancelled or unsuccessful. Tap Check Out to recover or retry the same payment.',
-        ),
-      )
+      ..on(Razorpay.EVENT_PAYMENT_ERROR, (PaymentFailureResponse r) {
+        if (r.code == 0) {
+          _failError(CheckoutCancelled());
+        } else {
+          _fail(
+            'Payment was not completed. Tap Check Out to retry or verify the previous payment.',
+          );
+        }
+      })
       ..on(
         Razorpay.EVENT_EXTERNAL_WALLET,
         (ExternalWalletResponse r) => _fail(
@@ -116,10 +124,14 @@ class RazorpayCheckout {
   }
 
   void _fail(String message) {
+    _failError(StateError(message));
+  }
+
+  void _failError(Object error) {
     final p = _pending;
     _pending = null;
     _order = null;
-    if (p != null && !p.isCompleted) p.completeError(StateError(message));
+    if (p != null && !p.isCompleted) p.completeError(error);
   }
 
   void dispose() {

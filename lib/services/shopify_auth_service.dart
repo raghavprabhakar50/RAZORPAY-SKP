@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -21,6 +22,23 @@ class ShopifyAuthService {
   final FlutterSecureStorage _secureStorage;
   final http.Client _client;
   Future<bool>? _refreshing;
+  static const _sessionMarkerKey = 'shopify_auth_session_marker';
+
+  Future<String?> sessionMarker() =>
+      _secureStorage.read(key: _sessionMarkerKey);
+
+  /// Binds cached customer data to one locally-created login session.
+  Future<String> ensureSessionMarker() async {
+    final existing = await sessionMarker();
+    if (existing != null && existing.isNotEmpty) return existing;
+    final random = Random.secure();
+    final value = List.generate(
+      32,
+      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    await _secureStorage.write(key: _sessionMarkerKey, value: value);
+    return value;
+  }
 
   /// A customer token, never an Admin API or shared payment secret.
   Future<String> checkoutAccessToken() async {
@@ -132,6 +150,7 @@ class ShopifyAuthService {
       if (accessToken == null || accessToken.isEmpty) return false;
 
       await _saveTokens(result);
+      await ensureSessionMarker();
       return true;
     } on FlutterAppAuthUserCancelledException {
       return false;
@@ -381,6 +400,7 @@ class ShopifyAuthService {
       _secureStorage.delete(key: 'shopify_refresh_token'),
       _secureStorage.delete(key: 'shopify_id_token'),
       _secureStorage.delete(key: 'shopify_access_token_expiry'),
+      _secureStorage.delete(key: _sessionMarkerKey),
     ]);
   }
 

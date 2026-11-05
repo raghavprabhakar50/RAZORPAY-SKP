@@ -3,6 +3,13 @@ import '../models/customer_profile.dart';
 import 'middleware_checkout_service.dart';
 import 'razorpay_checkout.dart';
 
+class CheckoutPriceChanged extends StateError {
+  CheckoutPriceChanged(int amount, String currency)
+    : super(
+        'Order total changed to $currency ${(amount / 100).toStringAsFixed(2)}. Review the total before tapping Check Out again.',
+      );
+}
+
 class CartPaymentFlow {
   CartPaymentFlow(this.service, this.gateway);
   final MiddlewareCheckoutService service;
@@ -26,53 +33,59 @@ class CartPaymentFlow {
 
     Future<Map<String, dynamic>> accept(Map<String, dynamic> state) async {
       check();
-      if (state['paid'] == true) await service.clear(profile.id);
+      // Captured money still needs the middleware to confirm the Shopify
+      // order. Keep the recovery reference until both are confirmed.
+      if (state['paid'] == true && state['order_created'] == true) {
+        await service.clear(profile.id);
+      }
       return state;
     }
 
     try {
       check();
-      progress('Checking payment…');
-      var saved = await service.restore(profile.id);
+      progress('Preparing payment...');
+      // Every tap is a new checkout attempt. Never restore or inspect a
+      // previous quote/payment here; the current cart is always repriced.
+      await service.clear(profile.id);
+      Map<String, dynamic> saved = {
+        'request': MiddlewareCheckoutService.payload(
+          items,
+          profile,
+          MiddlewareCheckoutService.requestId(),
+          discountCode: discountCode,
+        ),
+      };
+      await service.save(profile.id, saved);
       check();
-      if (saved != null &&
-          discountCode.trim().isNotEmpty &&
-          saved['request']?['discount_code'] != discountCode.trim()) {
-        throw StateError(
-          'Your saved payment uses its original discount code. Resume that checkout before starting a different payment.',
+      if (saved['quote'] == null) {
+        progress('Checking final total...');
+        final quote = await service.post(
+          'quote',
+          Map<String, dynamic>.from(saved['request'] as Map),
         );
-      }
-      if (saved?['quote'] is Map) {
-        final id = saved!['quote']['quote_id'];
-        Map<String, dynamic> state;
-        if (saved['callback'] is Map) {
-          try {
-            state = await service.post('verify', {
-              'quote_id': id,
-              ...Map<String, dynamic>.from(saved['callback'] as Map),
-            });
-          } catch (_) {
-            state = await service.post('status', {'quote_id': id});
-          }
-        } else {
-          state = await service.post('status', {'quote_id': id});
-        }
         check();
-        if (state['paid'] == true ||
-            ![
-              'created',
-              'failed',
-              'not_started',
-            ].contains(state['payment_status'])) {
-          return await accept(state);
-        }
-        if (state['payment_status'] == 'not_started') {
-          await service.clear(profile.id);
-          saved = null;
-        }
+        saved['quote'] = quote;
+        await service.save(profile.id, saved);
       }
-      if (saved == null) {
-        // Save request ID before pricing. An ambiguous draft write must reuse it.
+      var quote = Map<String, dynamic>.from(saved['quote'] as Map);
+      onQuote?.call({
+        ...quote,
+        'requested_discount_code': saved['request']?['discount_code'] ?? '',
+      });
+      check();
+      progress('Opening Razorpay...');
+      Map<String, dynamic> checkout;
+      try {
+        checkout = await service.post('start', {'quote_id': quote['quote_id']});
+      } on StateError catch (error) {
+        // If the short-lived quote expires between quote and start, simply
+        // create a fresh quote for this same cart. No previous checkout is
+        // inspected or required.
+        if (error.message !=
+            'Your price review expired. Review the cart again.') {
+          rethrow;
+        }
+        await service.clear(profile.id);
         saved = {
           'request': MiddlewareCheckoutService.payload(
             items,
@@ -82,28 +95,18 @@ class CartPaymentFlow {
           ),
         };
         await service.save(profile.id, saved);
-      }
-      check();
-      if (saved['quote'] == null) {
-        progress('Checking final total…');
-        final quote = await service.post(
+        check();
+        progress('Checking final total...');
+        quote = await service.post(
           'quote',
           Map<String, dynamic>.from(saved['request'] as Map),
         );
         check();
         saved['quote'] = quote;
         await service.save(profile.id, saved);
+        progress('Opening Razorpay...');
+        checkout = await service.post('start', {'quote_id': quote['quote_id']});
       }
-      final quote = Map<String, dynamic>.from(saved['quote'] as Map);
-      onQuote?.call({
-        ...quote,
-        'requested_discount_code': saved['request']?['discount_code'] ?? '',
-      });
-      check();
-      progress('Opening Razorpay…');
-      final checkout = await service.post('start', {
-        'quote_id': quote['quote_id'],
-      });
       check();
       if (checkout['mode'] != quote['mode'] ||
           checkout['amount'] != quote['amount'] ||
@@ -113,11 +116,20 @@ class CartPaymentFlow {
           'Checkout total changed. Check saved payment before retrying.',
         );
       }
-      final callback = await gateway.open(checkout, profile);
+      Map<String, String> callback;
+      try {
+        callback = await gateway.open(checkout, profile);
+      } on CheckoutCancelled {
+        // Cancellation means no payment was submitted. Keep the cart and
+        // clear only the local recovery pointer so the next tap creates a
+        // fresh payment request.
+        await service.clear(profile.id);
+        return {'cancelled': true, 'paid': false};
+      }
       saved['callback'] = callback;
       await service.save(profile.id, saved);
       check();
-      progress('Verifying payment…');
+      progress('Verifying payment...');
       return await accept(
         await service.post('verify', {
           'quote_id': quote['quote_id'],

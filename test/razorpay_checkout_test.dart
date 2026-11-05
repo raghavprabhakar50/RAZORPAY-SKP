@@ -46,10 +46,10 @@ class FakeGateway extends RazorpayCheckout {
     CustomerProfile customer,
   ) async {
     opens++;
-    RazorpayCheckout.options(data, customer);
-    if (cancel) throw StateError('Cancelled');
+    if (cancel) throw CheckoutCancelled();
     return {
-      'razorpay_order_id': 'order_fixture',
+      'razorpay_order_id':
+          data['razorpay_order_id']?.toString() ?? 'order_fixture',
       'razorpay_payment_id': 'pay_fixture',
       'razorpay_signature': 'signature',
     };
@@ -175,7 +175,12 @@ void main() {
               }
             : action == 'start'
             ? provider()
-            : {'paid': true, 'payment_status': 'captured', 'mode': 'live'};
+            : {
+                'paid': true,
+                'payment_status': 'captured',
+                'mode': 'live',
+                'order_created': true,
+              };
         if (action == 'verify') expect(body['razorpay_signature'], 'signature');
         return http.Response(
           jsonEncode({'status': true, 'data': data}),
@@ -203,7 +208,7 @@ void main() {
     expect(await service.restore(profile.id), null);
   });
   test(
-    'cancel preserves recovery; authorized payment never reopens checkout',
+    'cancel clears recovery and the next checkout can start fresh',
     () async {
       var authorized = false;
       final service = MiddlewareCheckoutService(
@@ -234,17 +239,59 @@ void main() {
       addTearDown(service.close);
       final gateway = FakeGateway()..cancel = true;
       final flow = CartPaymentFlow(service, gateway);
-      await expectLater(
-        flow.run([item], profile, () => true, (_) {}),
-        throwsStateError,
-      );
-      expect(await service.restore(profile.id), isNotNull);
+      final cancelled = await flow.run([item], profile, () => true, (_) {});
+      expect(cancelled['cancelled'], true);
+      expect(await service.restore(profile.id), isNull);
+      gateway.cancel = false;
       authorized = true;
       final state = await flow.run([item], profile, () => true, (_) {});
       expect(state['payment_status'], 'authorized');
-      expect(gateway.opens, 1);
+      expect(gateway.opens, 2);
     },
   );
+  test('each checkout tap quotes the current cart without restoring a previous checkout', () async {
+    final calls = <String>[];
+    final service = MiddlewareCheckoutService(
+      baseUri: Uri.parse('https://middleware.example.invalid'),
+      tokenProvider: () async => 'customer_token',
+      client: MockClient((r) async {
+        final action = r.url.path.split('/').last;
+        calls.add(action);
+        final data = action == 'quote'
+            ? {
+                'quote_id': 'new_quote',
+                'mode': 'live',
+                'amount': 339900,
+                'currency': 'INR',
+              }
+            : action == 'start'
+            ? provider()
+            : {
+                'paid': true,
+                'payment_status': 'captured',
+                'order_created': true,
+              };
+        return http.Response(
+          jsonEncode({'status': true, 'data': data}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+    addTearDown(service.close);
+    await service.save(profile.id, {
+      'request': MiddlewareCheckoutService.payload([item], profile, 'old'),
+      'quote': {'quote_id': 'old_quote', 'amount': 999999},
+    });
+    final gateway = FakeGateway();
+    final result = await CartPaymentFlow(
+      service,
+      gateway,
+    ).run([item.copyWith(quantity: 2)], profile, () => true, (_) {});
+    expect(result['paid'], true);
+    expect(calls, ['quote', 'start', 'verify']);
+    expect(gateway.opens, 1);
+  });
   test('HTML endpoint fails clearly without SDK or exposing tokens', () async {
     final service = MiddlewareCheckoutService(
       baseUri: Uri.parse('https://middleware.example.invalid'),
@@ -259,5 +306,91 @@ void main() {
     );
     addTearDown(service.close);
     await expectLater(service.post('quote', {}), throwsStateError);
+  });
+  test(
+    'captured payment without confirmed Shopify order keeps recovery',
+    () async {
+      final service = MiddlewareCheckoutService(
+        baseUri: Uri.parse('https://middleware.example.invalid'),
+        tokenProvider: () async => 'customer_token',
+        client: MockClient(
+          (r) async => http.Response(
+            jsonEncode({
+              'status': true,
+              'data': {'paid': true, 'payment_status': 'captured'},
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      addTearDown(service.close);
+      await service.save(profile.id, {
+        'request': MiddlewareCheckoutService.payload([item], profile, 'old'),
+        'quote': {'quote_id': 'old_quote', 'amount': 339900},
+      });
+      final gateway = FakeGateway();
+      final result = await CartPaymentFlow(
+        service,
+        gateway,
+      ).run([item], profile, () => true, (_) {});
+      expect(result['paid'], true);
+      expect(result['order_created'], isNot(true));
+      expect(await service.restore(profile.id), isNotNull);
+      expect(gateway.opens, 1);
+    },
+  );
+  test('quote expiring before start is repriced immediately', () async {
+    final calls = <String>[];
+    var quotes = 0;
+    var starts = 0;
+    final service = MiddlewareCheckoutService(
+      baseUri: Uri.parse('https://middleware.example.invalid'),
+      tokenProvider: () async => 'customer_token',
+      client: MockClient((r) async {
+        final action = r.url.path.split('/').last;
+        calls.add(action);
+        if (action == 'start' && ++starts == 1) {
+          return http.Response(
+            jsonEncode({
+              'status': false,
+              'message': 'Your price review expired. Review the cart again.',
+            }),
+            409,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final data = action == 'quote'
+            ? {
+                'quote_id': 'quote_${++quotes}',
+                'mode': 'live',
+                'amount': 339900,
+                'currency': 'INR',
+              }
+            : action == 'status'
+            ? {'paid': false, 'payment_status': 'not_started'}
+            : action == 'start'
+            ? provider()
+            : {
+                'paid': true,
+                'payment_status': 'captured',
+                'order_created': true,
+              };
+        return http.Response(
+          jsonEncode({'status': true, 'data': data}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+    addTearDown(service.close);
+    final gateway = FakeGateway();
+    final result = await CartPaymentFlow(
+      service,
+      gateway,
+    ).run([item], profile, () => true, (_) {});
+    expect(result['order_created'], true);
+    expect(calls, ['quote', 'start', 'quote', 'start', 'verify']);
+    expect(gateway.opens, 1);
   });
 }

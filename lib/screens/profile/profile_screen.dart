@@ -37,6 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Country _country = CountryParser.parseCountryCode('IN');
   Timer? _pinLookupTimer;
   bool _saving = false;
+  bool _uploadingImage = false;
   bool _locating = false;
   bool _lookingUpPin = false;
 
@@ -74,6 +75,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _pickImage() async {
+    if (_uploadingImage) return;
     try {
       final image = await _picker.pickImage(
         source: ImageSource.gallery,
@@ -81,9 +83,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxWidth: 1200,
       );
       if (image == null) return;
+      if (!mounted) return;
+      setState(() => _uploadingImage = true);
       await AccountStore.instance.saveProfileImage(image.path);
+      if (mounted) _showMessage('Profile photo saved.');
     } catch (error) {
       if (mounted) _showMessage(_message(error));
+    } finally {
+      if (mounted) setState(() => _uploadingImage = false);
     }
   }
 
@@ -298,7 +305,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     bottom: -3,
                     child: IconButton.filled(
                       tooltip: 'Change profile picture',
-                      onPressed: _pickImage,
+                      onPressed: _uploadingImage ? null : _pickImage,
                       style: IconButton.styleFrom(
                         backgroundColor: _brown,
                         foregroundColor: Colors.white,

@@ -101,6 +101,12 @@ class CustomerProfile {
     Map<String, dynamic> customer, {
     CustomerProfile? fallback,
   }) {
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isNotEmpty &&
+        fallback?.id.isNotEmpty == true &&
+        fallback!.id != customerId) {
+      fallback = null;
+    }
     final emailAddress = customer['emailAddress'];
     final phoneNumber = customer['phoneNumber'];
     final address = customer['defaultAddress'];

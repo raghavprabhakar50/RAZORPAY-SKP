@@ -45,7 +45,7 @@ class CartScreen extends StatefulWidget {
   State<CartScreen> createState() => _CartScreenState();
 }
 
-class _CartScreenState extends State<CartScreen> {
+class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   late final _service = widget.checkoutService ?? MiddlewareCheckoutService();
   late final _gateway = widget.paymentGateway ?? RazorpayCheckout();
   late final _paymentFlow = CartPaymentFlow(_service, _gateway);
@@ -63,23 +63,37 @@ class _CartScreenState extends State<CartScreen> {
   Future<CheckoutPriceSummary>? _pricing;
   bool _refreshingInventory = false;
   final Set<String> _checkingStock = <String>{};
+  Timer? _inventoryRefreshTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _inventoryRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_refreshCartInventory()),
+    );
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => unawaited(_refreshCartInventory()),
     );
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshCartInventory());
+    }
+  }
+
   Future<void> _refreshCartInventory() async {
-    if (_refreshingInventory) return;
+    if (_refreshingInventory || ShoppingStore.instance.cart.isEmpty) return;
     _refreshingInventory = true;
     var adjusted = false;
     try {
       final store = ShoppingStore.instance;
       final original = List<CartItem>.unmodifiable(store.cart);
       for (final item in original) {
+        storefrontService.invalidateProductCache(item.productHandle);
         final product = await storefrontService.fetchProduct(
           item.productHandle,
         );
@@ -179,9 +193,13 @@ class _CartScreenState extends State<CartScreen> {
       await _checkout(context);
     } catch (error) {
       if (mounted) {
-        setState(
-          () => _notice = error is StateError ? error.message.toString() : 'Unable to complete checkout. Tap Check Out to recover your saved payment before retrying.',
-        );
+        setState(() {
+          if (error is CheckoutPriceChanged) {
+            _pricingKey = null;
+            _pricing = null;
+          }
+          _notice = error is StateError ? error.message.toString() : 'Unable to complete checkout. Tap Check Out to recover your saved payment before retrying.';
+        });
       }
     } finally {
       if (mounted) {
@@ -195,6 +213,8 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   void dispose() {
+    _inventoryRefreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _orderInstructions.dispose();
     if (widget.paymentGateway == null) _gateway.dispose();
     if (widget.checkoutService == null) _service.close();
@@ -279,11 +299,15 @@ class _CartScreenState extends State<CartScreen> {
         !AccountStore.instance.isAuthenticated) {
       return;
     }
-    if (result['paid'] == true) {
-      setState(() {
+    setState(() {
+      if (result['paid'] == true && result['order_created'] == true) {
         _notice = 'Payment successful. Your order has been placed.';
-      });
-    }
+      } else if (result['paid'] == true) {
+        _notice = 'Payment received. Your order is being confirmed. Please do not pay again.';
+      } else {
+        _notice = 'Your payment is being checked. Please do not pay again until it is confirmed.';
+      }
+    });
   }
 
   @override
@@ -705,12 +729,12 @@ class _CartLineCard extends StatelessWidget {
                         fontSize: 11,
                       ),
                     ),
-                  if (stockAvailable != null &&
-                      stockAvailable >= 2 &&
-                      stockAvailable <= 5) ...[
+                  if (stockAvailable != null && stockAvailable <= 5) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Only $stockAvailable left in stock',
+                      stockAvailable <= 0
+                          ? 'Out of stock'
+                          : 'Only $stockAvailable left in stock',
                       style: const TextStyle(
                         color: Color(0xffc05f32),
                         fontSize: 11,
