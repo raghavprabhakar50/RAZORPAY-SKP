@@ -8,10 +8,18 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/customer_profile.dart';
 import 'middleware_profile_service.dart';
+import 'push_notification_service.dart';
 import 'shopify_auth_service.dart';
 
 class AccountStore extends ChangeNotifier {
-  AccountStore._();
+  AccountStore._() {
+    PushNotificationService.instance.tokenChanged.stream.listen((_) {
+      final current = _profile;
+      if (_authenticated && current != null) {
+        unawaited(PushNotificationService.instance.syncWithCustomer(current));
+      }
+    });
+  }
 
   static final AccountStore instance = AccountStore._();
   static const _profileKey = 'shopify_customer_profile_v1';
@@ -49,6 +57,7 @@ class AccountStore extends ChangeNotifier {
           _profile = await _authService.fetchCustomerProfile(fallback: cached);
           await _authService.ensureSessionMarker();
           await _persistProfile();
+          unawaited(PushNotificationService.instance.syncWithCustomer(_profile!));
           unawaited(_refreshProfileImage(_profile!, _sessionGeneration));
         } catch (_) {
           // Cached details were bound to this login session before use.
@@ -85,6 +94,9 @@ class AccountStore extends ChangeNotifier {
     );
     await _persistProfile();
     await refreshProfile();
+    if (_profile != null) {
+      unawaited(PushNotificationService.instance.syncWithCustomer(_profile!));
+    }
     final requested = (expectedEmail ?? fallbackEmail).trim().toLowerCase();
     final returned = _profile?.email.trim().toLowerCase() ?? '';
     if (requested.isNotEmpty && returned != requested) {
@@ -199,6 +211,9 @@ class AccountStore extends ChangeNotifier {
   Future<void> signOut() async {
     _sessionGeneration++;
     final imagePath = _profile?.localImagePath;
+    if (_authenticated) {
+      unawaited(PushNotificationService.instance.unregisterCurrentCustomer());
+    }
     _authenticated = false;
     _profile = null;
     notifyListeners();

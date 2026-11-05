@@ -5,6 +5,11 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
+
+import '../config/shopify_config.dart';
+import '../models/customer_profile.dart';
+import 'shopify_auth_service.dart';
 
 const _channelId = 'skp_general_notifications';
 
@@ -24,6 +29,10 @@ class PushNotificationService {
 
   final _localNotifications = FlutterLocalNotificationsPlugin();
   final tokenChanged = StreamController<String>.broadcast();
+  final _authService = ShopifyAuthService();
+  final _client = http.Client();
+  String? _latestToken;
+  bool _syncInProgress = false;
   bool _initialized = false;
 
   Future<void> initialize() async {
@@ -58,7 +67,10 @@ class PushNotificationService {
         sound: true,
         provisional: false,
       );
-      FirebaseMessaging.instance.onRegistered.listen(tokenChanged.add);
+      FirebaseMessaging.instance.onRegistered.listen((token) {
+        _latestToken = token;
+        tokenChanged.add(token);
+      });
       await FirebaseMessaging.instance.register();
 
       FirebaseMessaging.onMessage.listen(_showForegroundNotification);
@@ -73,6 +85,54 @@ class PushNotificationService {
     } catch (error, stackTrace) {
       // Notifications must never prevent the storefront from opening.
       debugPrint('Push notifications unavailable: $error\n$stackTrace');
+    }
+  }
+
+  /// Associates the current FCM token with the authenticated Shopify customer.
+  /// A guest session simply skips this call; it will run again after login.
+  Future<void> syncWithCustomer(CustomerProfile profile) async {
+    final token = _latestToken;
+    if (token == null || token.isEmpty || profile.id.isEmpty || _syncInProgress) return;
+    _syncInProgress = true;
+    try {
+      final accessToken = await _authService.checkoutAccessToken();
+      final base = ShopifyConfig.middlewareBaseUrl.replaceFirst(RegExp(r'/+$'), '');
+      final response = await _client.post(
+        Uri.parse('$base/api/mobile/notifications/register-token'),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'token': token,
+          'platform': 'android',
+          'state_code': profile.zoneCode,
+        }),
+      ).timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint('Notification token registration failed (${response.statusCode}).');
+      }
+    } catch (error) {
+      debugPrint('Notification token registration skipped: $error');
+    } finally {
+      _syncInProgress = false;
+    }
+  }
+
+  Future<void> unregisterCurrentCustomer() async {
+    final token = _latestToken;
+    if (token == null || token.isEmpty) return;
+    try {
+      final accessToken = await _authService.checkoutAccessToken();
+      final base = ShopifyConfig.middlewareBaseUrl.replaceFirst(RegExp(r'/+$'), '');
+      await _client.post(
+        Uri.parse('$base/api/mobile/notifications/unregister-token'),
+        headers: {'Authorization': 'Bearer $accessToken', 'Content-Type': 'application/json'},
+        body: jsonEncode({'token': token}),
+      ).timeout(const Duration(seconds: 10));
+    } catch (error) {
+      debugPrint('Notification token unregister skipped: $error');
     }
   }
 
