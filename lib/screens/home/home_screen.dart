@@ -153,12 +153,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList(growable: false);
   }
 
-  void _showTarget(String target) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(target)));
-  }
-
   void _openCategories() {
     Navigator.of(context).push(
       instantPageRoute<void>(
@@ -259,6 +253,16 @@ class _HomeScreenState extends State<HomeScreen> {
           collection: collection,
           storefrontService: _storefrontService,
         ),
+      ),
+    );
+  }
+
+  void _openAllProducts() {
+    _openCollection(
+      const StorefrontCollection(
+        id: '',
+        handle: 'all-products',
+        title: 'All Products',
       ),
     );
   }
@@ -407,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 34),
                       _SectionHeader(
                         title: 'Latest Arrivals',
-                        onSeeAll: () => _showTarget('All products'),
+                        onSeeAll: _openAllProducts,
                       ),
                       const SizedBox(height: 12),
                       if (products.isEmpty)
