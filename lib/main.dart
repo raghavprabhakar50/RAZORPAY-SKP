@@ -31,6 +31,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: notificationNavigatorKey,
       title: 'Sri Krishna Pearls',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,

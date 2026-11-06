@@ -57,7 +57,9 @@ class AccountStore extends ChangeNotifier {
           _profile = await _authService.fetchCustomerProfile(fallback: cached);
           await _authService.ensureSessionMarker();
           await _persistProfile();
-          unawaited(PushNotificationService.instance.syncWithCustomer(_profile!));
+          unawaited(
+            PushNotificationService.instance.syncWithCustomer(_profile!),
+          );
           unawaited(_refreshProfileImage(_profile!, _sessionGeneration));
         } catch (_) {
           // Cached details were bound to this login session before use.
@@ -124,6 +126,7 @@ class AccountStore extends ChangeNotifier {
       await _authService.ensureSessionMarker();
       await _persistProfile();
       notifyListeners();
+      unawaited(PushNotificationService.instance.syncWithCustomer(profile));
       unawaited(_refreshProfileImage(profile, generation));
     } catch (_) {
       if (!silent) rethrow;
@@ -212,7 +215,9 @@ class AccountStore extends ChangeNotifier {
     _sessionGeneration++;
     final imagePath = _profile?.localImagePath;
     if (_authenticated) {
-      unawaited(PushNotificationService.instance.unregisterCurrentCustomer());
+      await PushNotificationService.instance
+          .unregisterCurrentCustomer()
+          .timeout(const Duration(seconds: 5), onTimeout: () {});
     }
     _authenticated = false;
     _profile = null;
