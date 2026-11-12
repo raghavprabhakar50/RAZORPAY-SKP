@@ -137,6 +137,10 @@ class AccountStore extends ChangeNotifier {
     CustomerProfile profile,
     int generation,
   ) async {
+    // A locally saved image is authoritative for this device. Do not replace
+    // it with an older server response from a refresh already in flight.
+    final currentPath = _profile?.localImagePath;
+    if (currentPath != null && await File(currentPath).exists()) return;
     final revision = _imageRevision;
     try {
       final path = await _profileService.download(profile.id);
@@ -192,11 +196,19 @@ class AccountStore extends ChangeNotifier {
         _profile?.id != customerId) {
       return;
     }
+    final extension = sourcePath.split('.').last.toLowerCase();
+    final safeExtension =
+        const {'jpg', 'jpeg', 'png', 'webp'}.contains(extension)
+        ? (extension == 'jpeg' ? 'jpg' : extension)
+        : 'jpg';
+    // Preview the exact image the customer selected. Reading immediately
+    // from the server can return a stale/CDN-cached response, which made the
+    // upload appear successful while the avatar stayed blank or unchanged.
     final directory = await getApplicationSupportDirectory();
     final destinationPath =
-        '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.image';
-    final previousPath = _profile?.localImagePath;
+        '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.$safeExtension';
     await source.copy(destinationPath);
+    final previousPath = _profile?.localImagePath;
     if (!_authenticated ||
         generation != _sessionGeneration ||
         _profile?.id != customerId) {

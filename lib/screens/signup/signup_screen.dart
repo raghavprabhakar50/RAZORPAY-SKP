@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/account_store.dart';
 import '../../services/shopify_auth_service.dart';
+import '../../services/push_notification_service.dart';
 import '../home/home_screen.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -52,6 +53,10 @@ class _SignupScreenState extends State<SignupScreen> {
           firstName: _firstNameController.text,
           lastName: _lastNameController.text,
           phone: _phoneController.text,
+        );
+        if (!mounted) return;
+        await PushNotificationService.instance.requestPermissionFromUser(
+          context,
         );
         if (!mounted) return;
         if (widget.returnToPrevious) {

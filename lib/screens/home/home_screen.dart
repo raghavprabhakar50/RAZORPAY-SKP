@@ -10,7 +10,6 @@ import '../../models/home_catalog.dart';
 import '../../models/home_slide.dart';
 import '../../models/storefront_predictive_search_result.dart';
 import '../../services/account_store.dart';
-import '../../services/push_notification_service.dart';
 import '../../services/shopify_storefront_service.dart';
 import '../../utils/navigation.dart';
 import '../../widgets/account_avatar.dart';
@@ -58,12 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _homeData = _loadHome();
     _searchController.addListener(_onSearchChanged);
     _searchFocusNode.addListener(_refreshProductFilter);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !AccountStore.instance.isAuthenticated) return;
-      unawaited(
-        PushNotificationService.instance.requestPermissionFromUser(context),
-      );
-    });
   }
 
   Future<HomeScreenData> _loadHome({bool forceRefresh = false}) async {

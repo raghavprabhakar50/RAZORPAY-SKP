@@ -59,8 +59,23 @@ class MiddlewareProfileService {
     try {
       body = jsonDecode(response.body);
     } catch (_) {
+      final status = response.statusCode;
+      if (status == 413) {
+        throw StateError(
+          'The server rejected this profile photo as too large (HTTP 413).',
+        );
+      }
+      if (status >= 300 && status < 400) {
+        throw StateError(
+          'Profile image request was redirected (HTTP $status). Check the middleware URL and deployment.',
+        );
+      }
+      final contentType = response.headers['content-type']?.split(';').first;
+      final typeHint = contentType == null || contentType.isEmpty
+          ? ''
+          : ' ($contentType)';
       throw StateError(
-        'Profile image service is unavailable. Please try again.',
+        'Profile image endpoint returned an unexpected response (HTTP $status$typeHint). Check profile storage setup and server logs.',
       );
     }
     if (response.statusCode != 200 || body is! Map || body['status'] != true) {
@@ -112,8 +127,13 @@ class MiddlewareProfileService {
     }
     if (bytes.isEmpty) throw StateError('Unable to load your profile image.');
     final directory = await _directory();
+    final extension = switch (mime) {
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      _ => 'jpg',
+    };
     final file = File(
-      '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.image',
+      '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.$extension',
     );
     await file.writeAsBytes(bytes.takeBytes(), flush: true);
     return file.path;

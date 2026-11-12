@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/account_store.dart';
 import '../../services/shopify_auth_service.dart';
+import '../../services/push_notification_service.dart';
 import '../home/home_screen.dart';
 import '../signup/signup_screen.dart';
 
@@ -39,6 +40,8 @@ class _ShopifyLoginScreenState extends State<ShopifyLoginScreen> {
         fallbackEmail: _emailController.text,
         expectedEmail: _emailController.text,
       );
+      if (!mounted) return;
+      await PushNotificationService.instance.requestPermissionFromUser(context);
       if (!mounted) return;
       if (widget.returnToPrevious) {
         Navigator.of(context).pop(true);

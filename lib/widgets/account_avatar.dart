@@ -36,17 +36,19 @@ class AccountAvatar extends StatelessWidget {
               backgroundColor: Colors.white,
               child: CircleAvatar(
                 radius: radius - 2,
-                foregroundImage: image,
                 backgroundColor: const Color(0xffffe5b8),
                 child: image == null
-                    ? Icon(
-                        account.isAuthenticated
-                            ? Icons.person_rounded
-                            : Icons.person_outline_rounded,
-                        size: radius,
-                        color: const Color(0xff8f5c43),
-                      )
-                    : null,
+                    ? _placeholder(account.isAuthenticated, radius)
+                    : ClipOval(
+                        child: Image(
+                          image: image,
+                          width: (radius - 2) * 2,
+                          height: (radius - 2) * 2,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _placeholder(account.isAuthenticated, radius),
+                        ),
+                      ),
               ),
             ),
           ),
@@ -54,4 +56,10 @@ class AccountAvatar extends StatelessWidget {
       },
     );
   }
+
+  Widget _placeholder(bool authenticated, double radius) => Icon(
+    authenticated ? Icons.person_rounded : Icons.person_outline_rounded,
+    size: radius,
+    color: const Color(0xff8f5c43),
+  );
 }
