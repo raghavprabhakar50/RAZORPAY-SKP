@@ -12,8 +12,10 @@ import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
 import '../models/customer_profile.dart';
+import 'shopify_storefront_service.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/orders/my_orders_screen.dart';
+import '../screens/product/product_details_screen.dart';
 import 'shopify_auth_service.dart';
 
 const _channelId = 'skp_general_notifications';
@@ -214,6 +216,36 @@ class PushNotificationService {
         MaterialPageRoute<void>(builder: (_) => const MyOrdersScreen()),
       );
     } else if (link == 'home' || link == 'products') {
+      navigator.push(
+        MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+      );
+    } else if (link.startsWith('product:')) {
+      final handle = link.substring('product:'.length).trim();
+      if (handle.isNotEmpty) {
+        unawaited(_openProductNotification(navigator, handle));
+      }
+    }
+  }
+
+  Future<void> _openProductNotification(
+    NavigatorState navigator,
+    String handle,
+  ) async {
+    final storefront = ShopifyStorefrontService();
+    try {
+      final product = await storefront.fetchProduct(handle);
+      if (!navigator.mounted) return;
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ProductDetailsScreen(
+            product: product,
+            storefrontService: storefront,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Notification product could not be opened: $error');
+      if (!navigator.mounted) return;
       navigator.push(
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
       );
