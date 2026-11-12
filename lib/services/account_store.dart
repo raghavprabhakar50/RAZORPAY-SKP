@@ -186,24 +186,33 @@ class AccountStore extends ChangeNotifier {
     }
     final generation = _sessionGeneration;
     _imageRevision++;
-    await _profileService.upload(source);
-    if (!_authenticated ||
-        generation != _sessionGeneration ||
-        _profile?.id != customerId) {
-      return;
-    }
     final extension = sourcePath.split('.').last.toLowerCase();
     final safeExtension =
         const {'jpg', 'jpeg', 'png', 'webp'}.contains(extension)
         ? (extension == 'jpeg' ? 'jpg' : extension)
         : 'jpg';
-    // Preview the exact image the customer selected. Reading immediately
-    // from the server can return a stale/CDN-cached response, which made the
-    // upload appear successful while the avatar stayed blank or unchanged.
     final directory = await getApplicationSupportDirectory();
     final destinationPath =
         '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.$safeExtension';
-    await source.copy(destinationPath);
+    final selectedBytes = MiddlewareProfileService.normalizeImageBytes(
+      await source.readAsBytes(),
+    );
+    final destination = File(destinationPath);
+    await destination.writeAsBytes(selectedBytes, flush: true);
+    try {
+      // Upload the same normalized bytes that the app previews. This also
+      // avoids platform-specific picker/output-buffer prefixes on iOS.
+      await _profileService.upload(destination);
+    } catch (_) {
+      await _deleteFile(destinationPath);
+      rethrow;
+    }
+    if (!_authenticated ||
+        generation != _sessionGeneration ||
+        _profile?.id != customerId) {
+      await _deleteFile(destinationPath);
+      return;
+    }
     final previousPath = _profile?.localImagePath;
     if (!_authenticated ||
         generation != _sessionGeneration ||
