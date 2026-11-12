@@ -135,8 +135,46 @@ class MiddlewareProfileService {
     final file = File(
       '${directory.path}${Platform.pathSeparator}customer_${id[1]}_${DateTime.now().microsecondsSinceEpoch}.$extension',
     );
-    await file.writeAsBytes(bytes.takeBytes(), flush: true);
+    final imageBytes = normalizeImageBytes(bytes.takeBytes());
+    await file.writeAsBytes(imageBytes, flush: true);
     return file.path;
+  }
+
+  /// Some PHP hosting/output-buffer setups prepend whitespace before a
+  /// binary image response. Remove only that harmless prefix when the image
+  /// signature is immediately after it, so Android's decoder gets real bytes.
+  static Uint8List normalizeImageBytes(Uint8List bytes) {
+    bool startsAt(int offset, List<int> signature) {
+      if (offset + signature.length > bytes.length) return false;
+      for (var index = 0; index < signature.length; index++) {
+        if (bytes[offset + index] != signature[index]) return false;
+      }
+      return true;
+    }
+
+    var offset = 0;
+    while (offset < bytes.length &&
+        const {0x09, 0x0a, 0x0d, 0x20}.contains(bytes[offset])) {
+      offset++;
+    }
+    final isPng = startsAt(offset, const [
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    ]);
+    final isJpeg = startsAt(offset, const [0xff, 0xd8, 0xff]);
+    final isWebp =
+        startsAt(offset, const [0x52, 0x49, 0x46, 0x46]) &&
+        startsAt(offset + 8, const [0x57, 0x45, 0x42, 0x50]);
+    if (offset > 0 && (isPng || isJpeg || isWebp)) {
+      return Uint8List.sublistView(bytes, offset);
+    }
+    return bytes;
   }
 
   void close() => _client.close();

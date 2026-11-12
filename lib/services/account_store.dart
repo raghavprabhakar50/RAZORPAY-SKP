@@ -137,10 +137,6 @@ class AccountStore extends ChangeNotifier {
     CustomerProfile profile,
     int generation,
   ) async {
-    // A locally saved image is authoritative for this device. Do not replace
-    // it with an older server response from a refresh already in flight.
-    final currentPath = _profile?.localImagePath;
-    if (currentPath != null && await File(currentPath).exists()) return;
     final revision = _imageRevision;
     try {
       final path = await _profileService.download(profile.id);
@@ -216,11 +212,15 @@ class AccountStore extends ChangeNotifier {
       return;
     }
     _profile = _profile!.copyWith(localImagePath: destinationPath);
+    final savedProfile = _profile!;
     await _persistProfile();
     notifyListeners();
     if (previousPath != null && previousPath != destinationPath) {
       await _deleteFile(previousPath);
     }
+    // Confirm/read the middleware copy and refresh the same account on this
+    // device. Other devices fetch this image when their profile refreshes.
+    unawaited(_refreshProfileImage(savedProfile, generation));
   }
 
   Future<void> signOut() async {
