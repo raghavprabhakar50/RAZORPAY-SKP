@@ -104,6 +104,25 @@ class ShoppingStore extends ChangeNotifier {
     _commit();
   }
 
+  void refreshWishlistedProduct(StorefrontProduct product) {
+    final current = _wishlist[product.handle];
+    if (current == null) return;
+    final refreshed = WishlistItem.fromProduct(product);
+    if (current.id == refreshed.id &&
+        current.title == refreshed.title &&
+        current.amount == refreshed.amount &&
+        current.currencyCode == refreshed.currencyCode &&
+        current.imageUrl == refreshed.imageUrl &&
+        current.compareAtAmount == refreshed.compareAtAmount &&
+        current.firstVariantId == refreshed.firstVariantId &&
+        current.availableForSale == refreshed.availableForSale) {
+      return;
+    }
+    _wishlist[product.handle] = refreshed;
+    _changedBeforeLoad = true;
+    _commit();
+  }
+
   void addToCart({
     required StorefrontProduct product,
     StorefrontProductVariant? variant,

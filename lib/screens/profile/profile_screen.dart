@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:country_picker/country_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/customer_profile.dart';
 import '../../services/account_store.dart';
 import '../../services/address_lookup_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../widgets/account_avatar.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -88,7 +90,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await AccountStore.instance.saveProfileImage(image.path);
       if (mounted) _showMessage('Profile photo saved.');
     } catch (error) {
-      if (mounted) _showMessage(_message(error));
+      if (mounted) {
+        final message = _message(error);
+        if (error is PlatformException &&
+            message.toLowerCase().contains('permission')) {
+          _showSettingsMessage(message);
+        } else {
+          _showMessage(message);
+        }
+      }
     } finally {
       if (mounted) setState(() => _uploadingImage = false);
     }
@@ -122,7 +132,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _applyAddress(address, includeLines: true);
       _showMessage('Address filled from your current location.');
     } catch (error) {
-      if (mounted) _showMessage(_message(error));
+      if (mounted) {
+        final message = _message(error);
+        if (message.toLowerCase().contains('blocked')) {
+          _showSettingsMessage(message);
+        } else if (message.toLowerCase().contains('turn on location')) {
+          _showLocationSettingsMessage(message);
+        } else {
+          _showMessage(message);
+        }
+      }
     } finally {
       if (mounted) setState(() => _locating = false);
     }
@@ -213,6 +232,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showSettingsMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: Geolocator.openAppSettings,
+          ),
+        ),
+      );
+  }
+
+  void _showLocationSettingsMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          action: SnackBarAction(
+            label: 'Turn on',
+            onPressed: Geolocator.openLocationSettings,
+          ),
+        ),
+      );
   }
 
   static String _message(Object error) {
@@ -461,6 +508,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
               validator: _required,
             ),
             const SizedBox(height: 28),
+            if (!widget.requireCompletion) ...[
+              const _SectionTitle('App permissions'),
+              const SizedBox(height: 12),
+              _PermissionTile(
+                icon: Icons.notifications_active_outlined,
+                title: 'Notifications',
+                subtitle: 'Payment, order, back-in-stock and new offer updates',
+                buttonText: 'Manage',
+                onPressed: () => PushNotificationService.instance
+                    .requestPermissionFromUser(context, force: true),
+              ),
+              const SizedBox(height: 10),
+              _PermissionTile(
+                icon: Icons.location_on_outlined,
+                title: 'Location',
+                subtitle: 'Used only when you tap Use location for address',
+                buttonText: 'Use location',
+                onPressed: _locating ? null : _useCurrentLocation,
+              ),
+              const SizedBox(height: 28),
+            ],
             SizedBox(
               height: 52,
               child: FilledButton.icon(
@@ -504,6 +572,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return internationalLength >= 8 && internationalLength <= 15
         ? null
         : 'Enter a valid number';
+  }
+}
+
+class _PermissionTile extends StatelessWidget {
+  const _PermissionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.buttonText,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String buttonText;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xfffffbf5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xffe5d4c8)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: _ProfileScreenState._brown),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xff756a64),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(onPressed: onPressed, child: Text(buttonText)),
+        ],
+      ),
+    );
   }
 }
 

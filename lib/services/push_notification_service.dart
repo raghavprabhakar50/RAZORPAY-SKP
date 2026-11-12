@@ -6,6 +6,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
@@ -30,17 +32,24 @@ class PushNotificationService {
   static final instance = PushNotificationService._();
 
   final _localNotifications = FlutterLocalNotificationsPlugin();
+  static const _permissionPromptKey = 'push_permission_prompt_seen_v1';
+  static const _storage = FlutterSecureStorage();
   final tokenChanged = StreamController<String>.broadcast();
   final _authService = ShopifyAuthService();
   final _client = http.Client();
   String? _latestToken;
   bool _syncInProgress = false;
   bool _initialized = false;
+  Future<void>? _initializing;
   Map<String, dynamic>? _pendingNavigation;
   int _navigationRetries = 0;
 
-  Future<void> initialize() async {
-    if (_initialized || kIsWeb) return;
+  Future<void> initialize() {
+    if (_initialized || kIsWeb) return Future<void>.value();
+    return _initializing ??= _initialize();
+  }
+
+  Future<void> _initialize() async {
     try {
       await Firebase.initializeApp();
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -77,12 +86,6 @@ class PushNotificationService {
             ),
           );
 
-      await FirebaseMessaging.instance.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-      );
       FirebaseMessaging.instance.onRegistered.listen((token) {
         _latestToken = token;
         tokenChanged.add(token);
@@ -103,7 +106,85 @@ class PushNotificationService {
     } catch (error, stackTrace) {
       // Notifications must never prevent the storefront from opening.
       debugPrint('Push notifications unavailable: $error\n$stackTrace');
+    } finally {
+      _initializing = null;
     }
+  }
+
+  Future<AuthorizationStatus> permissionStatus() async {
+    if (kIsWeb) return AuthorizationStatus.denied;
+    final settings = await FirebaseMessaging.instance.getNotificationSettings();
+    return settings.authorizationStatus;
+  }
+
+  /// Shows an explanation before Android/iOS displays its permission prompt.
+  /// The automatic prompt is shown once; Profile can call this with [force]
+  /// when the customer explicitly wants to change notification access.
+  Future<bool> requestPermissionFromUser(
+    BuildContext context, {
+    bool force = false,
+  }) async {
+    if (kIsWeb) return false;
+    await initialize();
+    if (!_initialized) return false;
+    final status = await permissionStatus();
+    if (status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional) {
+      return true;
+    }
+    if (!force && await _storage.read(key: _permissionPromptKey) == '1') {
+      return false;
+    }
+    if (!context.mounted) return false;
+
+    final allow = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Allow notifications?'),
+        content: const Text(
+          'Get payment, order delivery, back-in-stock and new offer updates. '
+          'You can change this permission later from your phone settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Allow'),
+          ),
+        ],
+      ),
+    );
+    await _storage.write(key: _permissionPromptKey, value: '1');
+    if (allow != true) return false;
+
+    final result = await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
+    );
+    final granted =
+        result.authorizationStatus == AuthorizationStatus.authorized ||
+        result.authorizationStatus == AuthorizationStatus.provisional;
+    if (!granted && force && context.mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Notifications are blocked. Enable them from app settings.',
+            ),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: Geolocator.openAppSettings,
+            ),
+          ),
+        );
+    }
+    return granted;
   }
 
   void _openNotification(Map<String, dynamic> data) {
