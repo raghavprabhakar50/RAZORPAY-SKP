@@ -35,6 +35,8 @@ class PushNotificationService {
 
   final _localNotifications = FlutterLocalNotificationsPlugin();
   static const _permissionPromptKey = 'push_permission_prompt_seen_v1';
+  static const _firstLaunchPermissionPromptKey =
+      'push_permission_first_launch_seen_v1';
   static const _storage = FlutterSecureStorage();
   final tokenChanged = StreamController<String>.broadcast();
   final _authService = ShopifyAuthService();
@@ -117,6 +119,37 @@ class PushNotificationService {
     if (kIsWeb) return AuthorizationStatus.denied;
     final settings = await FirebaseMessaging.instance.getNotificationSettings();
     return settings.authorizationStatus;
+  }
+
+  /// Requests notification permission once on the first app launch, including
+  /// for guests. The navigator context survives the splash-to-home transition.
+  Future<void> requestPermissionOnFirstLaunch() async {
+    if (kIsWeb) return;
+    await initialize();
+    if (!_initialized) return;
+
+    final status = await permissionStatus();
+    if (status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional) {
+      return;
+    }
+    if (await _storage.read(key: _firstLaunchPermissionPromptKey) == '1') {
+      return;
+    }
+
+    // MaterialApp's Navigator can become available a frame after runApp.
+    for (var attempt = 0; attempt < 10; attempt++) {
+      final context = notificationNavigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        await requestPermissionFromUser(context, force: true);
+        await _storage.write(
+          key: _firstLaunchPermissionPromptKey,
+          value: '1',
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
   }
 
   /// Shows an explanation before Android/iOS displays its permission prompt.

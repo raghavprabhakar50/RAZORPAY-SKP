@@ -64,6 +64,14 @@ class AccountStore extends ChangeNotifier {
         } catch (_) {
           // Cached details were bound to this login session before use.
           _profile = cached;
+          // The profile screen can still be usable from the cached Shopify
+          // profile when the profile refresh is temporarily unavailable. Keep
+          // push-device registration tied to the restored auth session too.
+          if (_profile != null) {
+            unawaited(
+              PushNotificationService.instance.syncWithCustomer(_profile!),
+            );
+          }
         }
       } else {
         _profile = null;

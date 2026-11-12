@@ -23,6 +23,11 @@ void main() {
   unawaited(ShoppingStore.instance.initialize());
   unawaited(PushNotificationService.instance.initialize());
   runApp(const MyApp());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(
+      PushNotificationService.instance.requestPermissionOnFirstLaunch(),
+    );
+  });
 }
 
 class MyApp extends StatelessWidget {
