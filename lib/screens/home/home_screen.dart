@@ -501,44 +501,46 @@ class _HomeLoadingShimmer extends StatelessWidget {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
               ),
               child: AppShimmer(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const ShimmerBox(width: 145, height: 27),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 112,
-                      child: Row(
-                        children: List.generate(
-                          4,
-                          (index) => const Expanded(
-                            child: Padding(
-                              padding: EdgeInsets.only(right: 10),
-                              child: ShimmerBox(borderRadius: 9),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const ShimmerBox(width: 145, height: 27),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 112,
+                        child: Row(
+                          children: List.generate(
+                            4,
+                            (index) => const Expanded(
+                              child: Padding(
+                                padding: EdgeInsets.only(right: 10),
+                                child: ShimmerBox(borderRadius: 9),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 28),
-                    const ShimmerBox(width: 175, height: 27),
-                    const SizedBox(height: 15),
-                    const Row(
-                      children: [
-                        Expanded(child: ShimmerBox(height: 48)),
-                        SizedBox(width: 12),
-                        Expanded(child: ShimmerBox(height: 48)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Row(
-                      children: [
-                        Expanded(child: ShimmerBox(height: 48)),
-                        SizedBox(width: 12),
-                        Expanded(child: ShimmerBox(height: 48)),
-                      ],
-                    ),
-                  ],
+                      const SizedBox(height: 28),
+                      const ShimmerBox(width: 175, height: 27),
+                      const SizedBox(height: 15),
+                      const Row(
+                        children: [
+                          Expanded(child: ShimmerBox(height: 48)),
+                          SizedBox(width: 12),
+                          Expanded(child: ShimmerBox(height: 48)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Row(
+                        children: [
+                          Expanded(child: ShimmerBox(height: 48)),
+                          SizedBox(width: 12),
+                          Expanded(child: ShimmerBox(height: 48)),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
