@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../orders/my_orders_screen.dart';
 
@@ -299,153 +300,164 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: const Color(0xfff6cf88),
-      drawer: AccountDrawer(
-        onHome: () {},
-        onProfile: _openProfile,
-        onOrders: _openOrders,
-        onWishlist: _openWishlist,
-        onCart: _openCart,
-        onLogin: _openProfile,
-        onLogout: _logout,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Color(0xfff6d18d),
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
       ),
-      body: FutureBuilder<HomeScreenData>(
-        future: _homeData,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const _HomeLoadingShimmer();
-          }
-          if (snapshot.hasError || !snapshot.hasData) {
-            return SafeArea(child: _HomeError(onRetry: _reload));
-          }
-          final data = snapshot.requireData;
-          final products = _visibleProducts(data.products);
-          return RefreshIndicator(
-            color: _brown,
-            onRefresh: _reload,
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xfff6d18d), Color(0xfff4c977)],
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: const Color(0xfff6d18d),
+        drawer: AccountDrawer(
+          onHome: () {},
+          onProfile: _openProfile,
+          onOrders: _openOrders,
+          onWishlist: _openWishlist,
+          onCart: _openCart,
+          onLogin: _openProfile,
+          onLogout: _logout,
+        ),
+        body: SafeArea(
+          top: true,
+          bottom: false,
+          child: FutureBuilder<HomeScreenData>(
+            future: _homeData,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const _HomeLoadingShimmer();
+              }
+              if (snapshot.hasError || !snapshot.hasData) {
+                return SafeArea(child: _HomeError(onRetry: _reload));
+              }
+              final data = snapshot.requireData;
+              final products = _visibleProducts(data.products);
+              return RefreshIndicator(
+                color: _brown,
+                onRefresh: _reload,
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xfff6d18d), Color(0xfff4c977)],
+                        ),
+                      ),
+                      child: SafeArea(
+                        bottom: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 31, 10, 18),
+                          child: Column(
+                            children: [
+                              _HomeHeader(
+                                controller: _searchController,
+                                focusNode: _searchFocusNode,
+                                searchResults: _searchResults,
+                                searchLoading: _searchLoading,
+                                searchError: _searchError,
+                                showResults:
+                                    _searchFocusNode.hasFocus &&
+                                    _searchController.text.trim().isNotEmpty,
+                                onSuggestionTap: _useSearchSuggestion,
+                                onProductTap: _openProduct,
+                                onMenuTap: () =>
+                                    _scaffoldKey.currentState?.openDrawer(),
+                                onProfileTap: _openProfile,
+                              ),
+                              const SizedBox(height: 19),
+                              if (data.slides.isNotEmpty)
+                                _HeroCarousel(
+                                  slides: data.slides,
+                                  onOpen: _openSlideCollection,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 31, 10, 18),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(17, 18, 17, 26),
+                      decoration: const BoxDecoration(
+                        color: Color(0xfffdfcfb),
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(30),
+                        ),
+                      ),
                       child: Column(
                         children: [
-                          _HomeHeader(
-                            controller: _searchController,
-                            focusNode: _searchFocusNode,
-                            searchResults: _searchResults,
-                            searchLoading: _searchLoading,
-                            searchError: _searchError,
-                            showResults:
-                                _searchFocusNode.hasFocus &&
-                                _searchController.text.trim().isNotEmpty,
-                            onSuggestionTap: _useSearchSuggestion,
-                            onProductTap: _openProduct,
-                            onMenuTap: () =>
-                                _scaffoldKey.currentState?.openDrawer(),
-                            onProfileTap: _openProfile,
+                          _SectionHeader(
+                            title: 'Categories',
+                            onSeeAll: _openCategories,
                           ),
-                          const SizedBox(height: 19),
-                          if (data.slides.isNotEmpty)
-                            _HeroCarousel(
-                              slides: data.slides,
-                              onOpen: _openSlideCollection,
+                          const SizedBox(height: 9),
+                          _CategoryList(
+                            collections: data.collections,
+                            onAllTap: _openCategories,
+                            onTap: _openCollection,
+                          ),
+                          if (data.priceCollections.isNotEmpty) ...[
+                            const SizedBox(height: 24),
+                            const _SectionHeader(title: 'Shop By Price'),
+                            const SizedBox(height: 11),
+                            _PriceSelector(
+                              collections: data.priceCollections,
+                              selected: _selectedPriceCollection,
+                              onSelected: (collection) {
+                                setState(() {
+                                  _selectedPriceCollection = collection;
+                                });
+                                _openCollection(collection);
+                              },
+                            ),
+                          ],
+                          if (data.discountBanners.isNotEmpty) ...[
+                            const SizedBox(height: 47),
+                            _DiscountCarousel(banners: data.discountBanners),
+                            const SizedBox(height: 34),
+                          ] else
+                            const SizedBox(height: 34),
+                          _SectionHeader(
+                            title: 'Latest Arrivals',
+                            onSeeAll: _openAllProducts,
+                          ),
+                          const SizedBox(height: 12),
+                          if (products.isEmpty)
+                            const _EmptyProducts()
+                          else
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: products.length,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    crossAxisSpacing: 14,
+                                    mainAxisSpacing: 12,
+                                    childAspectRatio: .75,
+                                  ),
+                              itemBuilder: (context, index) => _ProductCard(
+                                product: products[index],
+                                onTap: () => _openProduct(products[index]),
+                              ),
                             ),
                         ],
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(17, 18, 17, 26),
-                  decoration: const BoxDecoration(
-                    color: Color(0xfffdfcfb),
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(30),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      _SectionHeader(
-                        title: 'Categories',
-                        onSeeAll: _openCategories,
-                      ),
-                      const SizedBox(height: 9),
-                      _CategoryList(
-                        collections: data.collections,
-                        onAllTap: _openCategories,
-                        onTap: _openCollection,
-                      ),
-                      if (data.priceCollections.isNotEmpty) ...[
-                        const SizedBox(height: 24),
-                        const _SectionHeader(title: 'Shop By Price'),
-                        const SizedBox(height: 11),
-                        _PriceSelector(
-                          collections: data.priceCollections,
-                          selected: _selectedPriceCollection,
-                          onSelected: (collection) {
-                            setState(() {
-                              _selectedPriceCollection = collection;
-                            });
-                            _openCollection(collection);
-                          },
-                        ),
-                      ],
-                      if (data.discountBanners.isNotEmpty) ...[
-                        const SizedBox(height: 47),
-                        _DiscountCarousel(banners: data.discountBanners),
-                        const SizedBox(height: 34),
-                      ] else
-                        const SizedBox(height: 34),
-                      _SectionHeader(
-                        title: 'Latest Arrivals',
-                        onSeeAll: _openAllProducts,
-                      ),
-                      const SizedBox(height: 12),
-                      if (products.isEmpty)
-                        const _EmptyProducts()
-                      else
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: products.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                crossAxisSpacing: 14,
-                                mainAxisSpacing: 12,
-                                childAspectRatio: .75,
-                              ),
-                          itemBuilder: (context, index) => _ProductCard(
-                            product: products[index],
-                            onTap: () => _openProduct(products[index]),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-      bottomNavigationBar: StorefrontBottomNavigation(
-        selectedIndex: 0,
-        onCategories: _openCategories,
-        onWishlist: _openWishlist,
-        onCart: _openCart,
+              );
+            },
+          ),
+        ),
+        bottomNavigationBar: StorefrontBottomNavigation(
+          selectedIndex: 0,
+          onCategories: _openCategories,
+          onWishlist: _openWishlist,
+          onCart: _openCart,
+        ),
       ),
     );
   }

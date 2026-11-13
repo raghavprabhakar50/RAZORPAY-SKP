@@ -45,6 +45,8 @@ class PushNotificationService {
   String? _latestToken;
   bool _syncInProgress = false;
   bool _initialized = false;
+  bool _registrationInProgress = false;
+  bool _registeredForPush = false;
   Future<void>? _initializing;
   Map<String, dynamic>? _pendingNavigation;
   int _navigationRetries = 0;
@@ -95,18 +97,11 @@ class PushNotificationService {
         _latestToken = token;
         tokenChanged.add(token);
       });
-      await FirebaseMessaging.instance.register();
 
       FirebaseMessaging.onMessage.listen(_showForegroundNotification);
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
         _openNotification(message.data);
       });
-      final initialMessage = await FirebaseMessaging.instance
-          .getInitialMessage();
-      if (initialMessage != null) {
-        _pendingNavigation = initialMessage.data;
-        WidgetsBinding.instance.addPostFrameCallback((_) => _flushNavigation());
-      }
       _initialized = true;
     } catch (error, stackTrace) {
       // Notifications must never prevent the storefront from opening.
@@ -122,6 +117,50 @@ class PushNotificationService {
     return settings.authorizationStatus;
   }
 
+  /// Register only after notification permission is granted. On Apple
+  /// platforms FCM registration must wait until APNs has issued its token.
+  Future<void> _registerForPush() async {
+    if (kIsWeb ||
+        !_initialized ||
+        _registeredForPush ||
+        _registrationInProgress) {
+      return;
+    }
+    _registrationInProgress = true;
+    try {
+      if (Platform.isIOS) {
+        String? apnsToken;
+        // APNs registration can finish shortly after the system permission
+        // prompt. Avoid making FCM registration calls until it is available.
+        for (var attempt = 0; attempt < 30; attempt++) {
+          apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+          if (apnsToken != null && apnsToken.isNotEmpty) break;
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+        if (apnsToken == null || apnsToken.isEmpty) {
+          debugPrint(
+            'Push registration deferred: APNs token is not available.',
+          );
+          return;
+        }
+      }
+
+      await FirebaseMessaging.instance.register();
+      _registeredForPush = true;
+
+      final initialMessage = await FirebaseMessaging.instance
+          .getInitialMessage();
+      if (initialMessage != null) {
+        _pendingNavigation = initialMessage.data;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _flushNavigation());
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Push registration unavailable: $error\n$stackTrace');
+    } finally {
+      _registrationInProgress = false;
+    }
+  }
+
   /// Requests notification permission once on the first app launch, including
   /// for guests. The navigator context survives the splash-to-home transition.
   Future<void> requestPermissionOnFirstLaunch() async {
@@ -132,6 +171,7 @@ class PushNotificationService {
     final status = await permissionStatus();
     if (status == AuthorizationStatus.authorized ||
         status == AuthorizationStatus.provisional) {
+      await _registerForPush();
       return;
     }
     if (await _storage.read(key: _firstLaunchPermissionPromptKey) == '1') {
@@ -143,10 +183,7 @@ class PushNotificationService {
       final context = notificationNavigatorKey.currentContext;
       if (context != null && context.mounted) {
         await requestPermissionFromUser(context, force: true);
-        await _storage.write(
-          key: _firstLaunchPermissionPromptKey,
-          value: '1',
-        );
+        await _storage.write(key: _firstLaunchPermissionPromptKey, value: '1');
         return;
       }
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -205,6 +242,7 @@ class PushNotificationService {
     final granted =
         result.authorizationStatus == AuthorizationStatus.authorized ||
         result.authorizationStatus == AuthorizationStatus.provisional;
+    if (granted) await _registerForPush();
     if (!granted && force && context.mounted) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
