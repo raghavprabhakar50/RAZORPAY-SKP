@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -312,7 +313,7 @@ class PushNotificationService {
             },
             body: jsonEncode({
               'token': token,
-              'platform': 'android',
+              'platform': Platform.isIOS ? 'ios' : 'android',
               'state_code': profile.zoneCode,
             }),
           )
@@ -372,6 +373,11 @@ class PushNotificationService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
         ),
       ),
       payload: jsonEncode(message.data),
