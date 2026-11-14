@@ -43,7 +43,8 @@ class PushNotificationService {
   final _authService = ShopifyAuthService();
   final _client = http.Client();
   String? _latestToken;
-  bool _syncInProgress = false;
+  CustomerProfile? _pendingCustomerSync;
+  Future<void>? _customerSyncTask;
   bool _initialized = false;
   bool _registrationInProgress = false;
   bool _registeredForPush = false;
@@ -203,6 +204,7 @@ class PushNotificationService {
     final status = await permissionStatus();
     if (status == AuthorizationStatus.authorized ||
         status == AuthorizationStatus.provisional) {
+      await _registerForPush();
       return true;
     }
     if (!force && await _storage.read(key: _permissionPromptKey) == '1') {
@@ -327,14 +329,60 @@ class PushNotificationService {
   /// Associates the current FCM token with the authenticated Shopify customer.
   /// A guest session simply skips this call; it will run again after login.
   Future<void> syncWithCustomer(CustomerProfile profile) async {
-    final token = _latestToken;
-    if (token == null ||
-        token.isEmpty ||
-        profile.id.isEmpty ||
-        _syncInProgress) {
+    // Login/profile refresh/token registration can all request a sync at once.
+    // Keep the latest profile and drain serially so an account switch is not
+    // silently dropped while an earlier request is in flight.
+    _pendingCustomerSync = profile;
+    final active = _customerSyncTask;
+    if (active != null) return active;
+
+    final task = _drainCustomerSyncQueue();
+    _customerSyncTask = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_customerSyncTask, task)) _customerSyncTask = null;
+    }
+  }
+
+  Future<void> _drainCustomerSyncQueue() async {
+    while (_pendingCustomerSync != null) {
+      final profile = _pendingCustomerSync!;
+      _pendingCustomerSync = null;
+      await _registerCustomerDevice(profile);
+    }
+  }
+
+  Future<void> _registerCustomerDevice(CustomerProfile profile) async {
+    var token = _latestToken;
+    if (token == null || token.isEmpty) {
+      // Registration can complete after the login/profile callbacks. Start it
+      // if permission is already granted and wait briefly for onRegistered.
+      // Never show a second permission prompt from this background path.
+      try {
+        await initialize();
+        final status = await permissionStatus();
+        if (status == AuthorizationStatus.authorized ||
+            status == AuthorizationStatus.provisional) {
+          await _registerForPush();
+          for (var attempt = 0; attempt < 20; attempt++) {
+            token = _latestToken;
+            if (token != null && token.isNotEmpty) break;
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+          }
+        }
+      } catch (error) {
+        debugPrint(
+          'Notification registration is waiting for a device token: $error',
+        );
+      }
+    }
+    if (token == null || token.isEmpty) {
+      debugPrint(
+        'Notification registration skipped: no registered device token.',
+      );
       return;
     }
-    _syncInProgress = true;
     try {
       final accessToken = await _authService.checkoutAccessToken();
       final base = ShopifyConfig.middlewareBaseUrl.replaceFirst(
@@ -358,13 +406,16 @@ class PushNotificationService {
           .timeout(const Duration(seconds: 20));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         debugPrint(
-          'Notification token registration failed (${response.statusCode}).',
+          'Notification token registration failed (${response.statusCode}): '
+          '${response.body.length > 300 ? response.body.substring(0, 300) : response.body}',
+        );
+      } else {
+        debugPrint(
+          'Notification device registration synced for signed-in account.',
         );
       }
     } catch (error) {
-      debugPrint('Notification token registration skipped: $error');
-    } finally {
-      _syncInProgress = false;
+      debugPrint('Notification token registration failed: $error');
     }
   }
 
