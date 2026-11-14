@@ -15,8 +15,10 @@ import '../config/shopify_config.dart';
 import '../models/customer_profile.dart';
 import 'shopify_storefront_service.dart';
 import '../screens/home/home_screen.dart';
+import '../screens/cart/cart_screen.dart';
 import '../screens/orders/my_orders_screen.dart';
 import '../screens/product/product_details_screen.dart';
+import '../models/wishlist_item.dart';
 import 'shopify_auth_service.dart';
 
 const _channelId = 'skp_general_notifications';
@@ -44,6 +46,7 @@ class PushNotificationService {
   final _client = http.Client();
   String? _latestToken;
   CustomerProfile? _pendingCustomerSync;
+  CustomerProfile? _activeCustomer;
   Future<void>? _customerSyncTask;
   bool _initialized = false;
   bool _registrationInProgress = false;
@@ -293,6 +296,13 @@ class PushNotificationService {
       navigator.push(
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
       );
+    } else if (link == 'cart') {
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              CartScreen(storefrontService: ShopifyStorefrontService()),
+        ),
+      );
     } else if (link.startsWith('product:')) {
       final handle = link.substring('product:'.length).trim();
       if (handle.isNotEmpty) {
@@ -332,6 +342,7 @@ class PushNotificationService {
     // Login/profile refresh/token registration can all request a sync at once.
     // Keep the latest profile and drain serially so an account switch is not
     // silently dropped while an earlier request is in flight.
+    _activeCustomer = profile;
     _pendingCustomerSync = profile;
     final active = _customerSyncTask;
     if (active != null) return active;
@@ -413,6 +424,10 @@ class PushNotificationService {
         debugPrint(
           'Notification device registration synced for signed-in account.',
         );
+        await _postCustomerNotification(
+          'preferences',
+          await notificationPreferences(),
+        );
       }
     } catch (error) {
       debugPrint('Notification token registration failed: $error');
@@ -440,6 +455,107 @@ class PushNotificationService {
           .timeout(const Duration(seconds: 4));
     } catch (error) {
       debugPrint('Notification token unregister skipped: $error');
+    } finally {
+      _activeCustomer = null;
+    }
+  }
+
+  String get _notificationPreferencesKey =>
+      'notification_preferences_v1_${_activeCustomer?.id ?? 'guest'}';
+  static const Map<String, bool> _defaultNotificationPreferences = {
+    'transactional_enabled': true,
+    'product_updates_enabled': true,
+    'offers_enabled': true,
+    'cart_reminders_enabled': false,
+  };
+
+  Future<Map<String, bool>> notificationPreferences() async {
+    try {
+      final raw = await _storage.read(key: _notificationPreferencesKey);
+      if (raw != null) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return {
+            for (final entry in _defaultNotificationPreferences.entries)
+              entry.key: decoded[entry.key] is bool
+                  ? decoded[entry.key] as bool
+                  : entry.value,
+          };
+        }
+      }
+    } catch (_) {
+      // Defaults keep notification delivery available if local settings fail.
+    }
+    return Map<String, bool>.from(_defaultNotificationPreferences);
+  }
+
+  Future<void> saveNotificationPreferences(
+    Map<String, bool> preferences,
+  ) async {
+    final values = {
+      for (final entry in _defaultNotificationPreferences.entries)
+        entry.key: preferences[entry.key] ?? entry.value,
+    };
+    await _storage.write(
+      key: _notificationPreferencesKey,
+      value: jsonEncode(values),
+    );
+    if (_activeCustomer != null) {
+      await _postCustomerNotification('preferences', values);
+    }
+  }
+
+  Future<void> syncWishlistItem(
+    WishlistItem item, {
+    required bool active,
+  }) async {
+    if (_activeCustomer == null) return;
+    await _postCustomerNotification('wishlist', {
+      'handle': item.handle,
+      'title': item.title,
+      'price': item.amount,
+      'currency_code': item.currencyCode,
+      'active': active,
+    });
+  }
+
+  Future<void> syncCartActivity({
+    required bool active,
+    required String summary,
+    required String stateCode,
+  }) async {
+    if (_activeCustomer == null) return;
+    await _postCustomerNotification('cart-activity', {
+      'active': active,
+      'summary': summary,
+      'state_code': stateCode,
+    });
+  }
+
+  Future<void> _postCustomerNotification(
+    String endpoint,
+    Map<String, dynamic> body,
+  ) async {
+    if (_activeCustomer == null) return;
+    try {
+      final accessToken = await _authService.checkoutAccessToken();
+      final base = ShopifyConfig.middlewareBaseUrl.replaceFirst(
+        RegExp(r'/+$'),
+        '',
+      );
+      await _client
+          .post(
+            Uri.parse('$base/api/mobile/notifications/$endpoint'),
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (error) {
+      debugPrint('Notification preference/activity sync skipped: $error');
     }
   }
 

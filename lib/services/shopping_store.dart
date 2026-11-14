@@ -9,6 +9,7 @@ import '../models/home_catalog.dart';
 import '../models/wishlist_item.dart';
 import 'account_cart_state.dart';
 import 'account_store.dart';
+import 'push_notification_service.dart';
 
 class ShoppingStore extends ChangeNotifier {
   ShoppingStore._() {
@@ -25,6 +26,7 @@ class ShoppingStore extends ChangeNotifier {
   final AccountCartState _cartState = AccountCartState();
   List<CartItem> get _cart => _cartState.items;
   Future<void> _persistQueue = Future<void>.value();
+  Timer? _cartActivityTimer;
   bool _changedBeforeLoad = false;
   bool _initialized = false;
   Future<void>? _initializing;
@@ -95,13 +97,30 @@ class ShoppingStore extends ChangeNotifier {
       _wishlist[product.handle] = WishlistItem.fromProduct(product);
     }
     _commit();
+    if (AccountStore.instance.isAuthenticated) {
+      unawaited(
+        PushNotificationService.instance.syncWishlistItem(
+          WishlistItem.fromProduct(product),
+          active: !removed,
+        ),
+      );
+    }
     return !removed;
   }
 
   void removeFromWishlist(String productHandle) {
-    if (_wishlist.remove(productHandle) == null) return;
+    final removed = _wishlist.remove(productHandle);
+    if (removed == null) return;
     _changedBeforeLoad = true;
     _commit();
+    if (AccountStore.instance.isAuthenticated) {
+      unawaited(
+        PushNotificationService.instance.syncWishlistItem(
+          removed,
+          active: false,
+        ),
+      );
+    }
   }
 
   void refreshWishlistedProduct(StorefrontProduct product) {
@@ -137,7 +156,7 @@ class ShoppingStore extends ChangeNotifier {
       giftMessage: giftMessage,
     );
     _cartState.add(next);
-    _commit();
+    _commit(trackCart: true);
   }
 
   void incrementCartItem(String key) {
@@ -145,7 +164,7 @@ class ShoppingStore extends ChangeNotifier {
     if (index < 0) return;
     _changedBeforeLoad = true;
     _cartState.increment(key);
-    _commit();
+    _commit(trackCart: true);
   }
 
   void decrementCartItem(String key) {
@@ -153,7 +172,7 @@ class ShoppingStore extends ChangeNotifier {
     if (index < 0) return;
     _changedBeforeLoad = true;
     _cartState.decrement(key);
-    _commit();
+    _commit(trackCart: true);
   }
 
   void removeCartItem(String key) {
@@ -161,17 +180,17 @@ class ShoppingStore extends ChangeNotifier {
     _cartState.remove(key);
     if (_cart.length == previousLength) return;
     _changedBeforeLoad = true;
-    _commit();
+    _commit(trackCart: true);
   }
 
   void replaceCartItem(String key, CartItem replacement) {
     if (!_cart.any((item) => item.key == key)) return;
     _changedBeforeLoad = true;
     _cartState.replace(key, replacement);
-    _commit();
+    _commit(trackCart: true);
   }
 
-  void _commit() {
+  void _commit({bool trackCart = false}) {
     notifyListeners();
     if (!_initialized) return; // Don't overwrite disk before restore/replay.
     final payload = jsonEncode({
@@ -195,5 +214,24 @@ class ShoppingStore extends ChangeNotifier {
           await _storage.write(key: _storageKey, value: jsonEncode(legacy));
         })
         .catchError((_) {});
+    if (trackCart) _scheduleCartActivitySync();
+  }
+
+  void _scheduleCartActivitySync() {
+    _cartActivityTimer?.cancel();
+    _cartActivityTimer = Timer(const Duration(milliseconds: 1200), () {
+      final account = AccountStore.instance;
+      if (!account.isAuthenticated) return;
+      final summary = _cart
+          .map((item) => '${item.title} x${item.quantity}')
+          .join(', ');
+      unawaited(
+        PushNotificationService.instance.syncCartActivity(
+          active: _cart.isNotEmpty,
+          summary: summary,
+          stateCode: account.profile?.zoneCode ?? '',
+        ),
+      );
+    });
   }
 }
