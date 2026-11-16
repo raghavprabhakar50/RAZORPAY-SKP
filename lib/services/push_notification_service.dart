@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/shopify_config.dart';
@@ -217,21 +216,6 @@ class PushNotificationService {
         result.authorizationStatus == AuthorizationStatus.authorized ||
         result.authorizationStatus == AuthorizationStatus.provisional;
     if (granted) await _registerForPush();
-    if (!granted && force && context.mounted) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Notifications are blocked. Enable them from app settings.',
-            ),
-            action: SnackBarAction(
-              label: 'Settings',
-              onPressed: Geolocator.openAppSettings,
-            ),
-          ),
-        );
-    }
     return granted;
   }
 
