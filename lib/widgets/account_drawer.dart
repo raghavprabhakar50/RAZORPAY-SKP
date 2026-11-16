@@ -10,7 +10,6 @@ class AccountDrawer extends StatelessWidget {
     required this.onOrders,
     required this.onWishlist,
     required this.onCart,
-    required this.onNotificationPreferences,
     required this.onLogin,
     required this.onLogout,
     super.key,
@@ -21,7 +20,6 @@ class AccountDrawer extends StatelessWidget {
   final VoidCallback onOrders;
   final VoidCallback onWishlist;
   final VoidCallback onCart;
-  final VoidCallback onNotificationPreferences;
   final VoidCallback onLogin;
   final VoidCallback onLogout;
 
@@ -126,13 +124,7 @@ class AccountDrawer extends StatelessWidget {
                   label: 'Cart',
                   onTap: () => _select(context, onCart),
                 ),
-                if (account.isAuthenticated)
-                  _DrawerTile(
-                    icon: Icons.notifications_none_rounded,
-                    label: 'Notification preferences',
-                    onTap: () => _select(context, onNotificationPreferences),
-                  ),
-                const Spacer(),
+                if (account.isAuthenticated) const Spacer(),
                 if (account.isAuthenticated) ...[
                   const Divider(height: 1),
                   _DrawerTile(

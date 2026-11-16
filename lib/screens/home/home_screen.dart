@@ -23,7 +23,6 @@ import '../login/login_screen.dart';
 import '../login/shopify_login_screen.dart';
 import '../product/product_details_screen.dart';
 import '../profile/profile_screen.dart';
-import '../profile/notification_preferences_screen.dart';
 import '../wishlist/wishlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -201,15 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const MyOrdersScreen()));
   }
 
-  Future<void> _openNotificationPreferences() async {
-    if (!await _ensureLogin() || !mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const NotificationPreferencesScreen(),
-      ),
-    );
-  }
-
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -325,7 +315,6 @@ class _HomeScreenState extends State<HomeScreen> {
           onOrders: _openOrders,
           onWishlist: _openWishlist,
           onCart: _openCart,
-          onNotificationPreferences: _openNotificationPreferences,
           onLogin: _openProfile,
           onLogout: _logout,
         ),

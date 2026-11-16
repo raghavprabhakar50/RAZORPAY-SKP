@@ -37,9 +37,8 @@ class PushNotificationService {
   static final instance = PushNotificationService._();
 
   final _localNotifications = FlutterLocalNotificationsPlugin();
-  static const _permissionPromptKey = 'push_permission_prompt_seen_v1';
   static const _firstLaunchPermissionPromptKey =
-      'push_permission_first_launch_seen_v1';
+      'push_permission_first_launch_seen_v2';
   static const _storage = FlutterSecureStorage();
   final tokenChanged = StreamController<String>.broadcast();
   final _authService = ShopifyAuthService();
@@ -186,7 +185,7 @@ class PushNotificationService {
     for (var attempt = 0; attempt < 10; attempt++) {
       final context = notificationNavigatorKey.currentContext;
       if (context != null && context.mounted) {
-        await requestPermissionFromUser(context, force: true);
+        await requestPermissionFromUser(context);
         await _storage.write(key: _firstLaunchPermissionPromptKey, value: '1');
         return;
       }
@@ -194,13 +193,9 @@ class PushNotificationService {
     }
   }
 
-  /// Shows an explanation before Android/iOS displays its permission prompt.
-  /// The automatic prompt is shown once; Profile can call this with [force]
-  /// when the customer explicitly wants to change notification access.
-  Future<bool> requestPermissionFromUser(
-    BuildContext context, {
-    bool force = false,
-  }) async {
+  /// Requests the operating system notification permission directly. The OS
+  /// owns the prompt and the customer can change this later in phone settings.
+  Future<bool> requestPermissionFromUser(BuildContext context) async {
     if (kIsWeb) return false;
     await initialize();
     if (!_initialized) return false;
@@ -210,33 +205,7 @@ class PushNotificationService {
       await _registerForPush();
       return true;
     }
-    if (!force && await _storage.read(key: _permissionPromptKey) == '1') {
-      return false;
-    }
     if (!context.mounted) return false;
-
-    final allow = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Allow notifications?'),
-        content: const Text(
-          'Get payment, order delivery, back-in-stock and new offer updates. '
-          'You can change this permission later from your phone settings.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Not now'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Allow'),
-          ),
-        ],
-      ),
-    );
-    await _storage.write(key: _permissionPromptKey, value: '1');
-    if (allow != true) return false;
 
     final result = await FirebaseMessaging.instance.requestPermission(
       alert: true,
@@ -466,7 +435,7 @@ class PushNotificationService {
     'transactional_enabled': true,
     'product_updates_enabled': true,
     'offers_enabled': true,
-    'cart_reminders_enabled': false,
+    'cart_reminders_enabled': true,
   };
 
   Future<Map<String, bool>> notificationPreferences() async {
@@ -475,12 +444,9 @@ class PushNotificationService {
       if (raw != null) {
         final decoded = jsonDecode(raw);
         if (decoded is Map) {
-          return {
-            for (final entry in _defaultNotificationPreferences.entries)
-              entry.key: decoded[entry.key] is bool
-                  ? decoded[entry.key] as bool
-                  : entry.value,
-          };
+          // Notification categories follow the single OS permission. Ignore
+          // old per-category opt-outs left by the former settings screen.
+          return Map<String, bool>.from(_defaultNotificationPreferences);
         }
       }
     } catch (_) {
@@ -492,10 +458,7 @@ class PushNotificationService {
   Future<void> saveNotificationPreferences(
     Map<String, bool> preferences,
   ) async {
-    final values = {
-      for (final entry in _defaultNotificationPreferences.entries)
-        entry.key: preferences[entry.key] ?? entry.value,
-    };
+    final values = Map<String, bool>.from(_defaultNotificationPreferences);
     await _storage.write(
       key: _notificationPreferencesKey,
       value: jsonEncode(values),
