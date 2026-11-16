@@ -95,10 +95,10 @@ class PushNotificationService {
             ),
           );
 
-      FirebaseMessaging.instance.onRegistered.listen((token) {
-        _latestToken = token;
-        tokenChanged.add(token);
-      });
+      // onRegistered emits a Firebase Installation ID in newer
+      // firebase_messaging versions, not the FCM registration token expected
+      // by the middleware's send endpoint. Keep the actual FCM token here.
+      FirebaseMessaging.instance.onTokenRefresh.listen(_acceptFcmToken);
 
       FirebaseMessaging.onMessage.listen(_showForegroundNotification);
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
@@ -148,7 +148,14 @@ class PushNotificationService {
       }
 
       await FirebaseMessaging.instance.register();
-      _registeredForPush = true;
+
+      // Fetch the FCM registration token explicitly. The onRegistered stream
+      // is an installation ID and cannot be used as an FCM HTTP v1 target.
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null && token.isNotEmpty) {
+        _acceptFcmToken(token);
+        _registeredForPush = true;
+      }
 
       final initialMessage = await FirebaseMessaging.instance
           .getInitialMessage();
@@ -161,6 +168,12 @@ class PushNotificationService {
     } finally {
       _registrationInProgress = false;
     }
+  }
+
+  void _acceptFcmToken(String token) {
+    if (token.isEmpty || token == _latestToken) return;
+    _latestToken = token;
+    tokenChanged.add(token);
   }
 
   /// Requests notification permission once on the first app launch, including
@@ -321,7 +334,7 @@ class PushNotificationService {
     var token = _latestToken;
     if (token == null || token.isEmpty) {
       // Registration can complete after the login/profile callbacks. Start it
-      // if permission is already granted and wait briefly for onRegistered.
+      // if permission is already granted and wait briefly for the FCM token.
       // Never show a second permission prompt from this background path.
       try {
         await initialize();
