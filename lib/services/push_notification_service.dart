@@ -120,7 +120,8 @@ class PushNotificationService {
   }
 
   /// Register only after notification permission is granted. On Apple
-  /// platforms FCM registration must wait until APNs has issued its token.
+  /// platforms, request APNs registration first; Firebase Messaging can only
+  /// return an FCM token after iOS supplies the APNs token.
   Future<void> _registerForPush() async {
     if (kIsWeb ||
         !_initialized ||
@@ -130,10 +131,12 @@ class PushNotificationService {
     }
     _registrationInProgress = true;
     try {
+      await FirebaseMessaging.instance.register();
+
       if (Platform.isIOS) {
         String? apnsToken;
-        // APNs registration can finish shortly after the system permission
-        // prompt. Avoid making FCM registration calls until it is available.
+        // APNs registration completes asynchronously after register(). Wait
+        // for iOS to return its token before asking Firebase for an FCM token.
         for (var attempt = 0; attempt < 30; attempt++) {
           apnsToken = await FirebaseMessaging.instance.getAPNSToken();
           if (apnsToken != null && apnsToken.isNotEmpty) break;
@@ -147,14 +150,16 @@ class PushNotificationService {
         }
       }
 
-      await FirebaseMessaging.instance.register();
-
       // Fetch the FCM registration token explicitly. The onRegistered stream
       // is an installation ID and cannot be used as an FCM HTTP v1 target.
-      final token = await FirebaseMessaging.instance.getToken();
+      String? token;
+      for (var attempt = 0; attempt < 10; attempt++) {
+        token = await FirebaseMessaging.instance.getToken();
+        if (token != null && token.isNotEmpty) break;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
       if (token != null && token.isNotEmpty) {
         _acceptFcmToken(token);
-        _registeredForPush = true;
       }
 
       final initialMessage = await FirebaseMessaging.instance
@@ -171,9 +176,14 @@ class PushNotificationService {
   }
 
   void _acceptFcmToken(String token) {
-    if (token.isEmpty || token == _latestToken) return;
+    if (token.isEmpty) return;
+    final changed = token != _latestToken;
     _latestToken = token;
+    _registeredForPush = true;
+    if (!changed) return;
     tokenChanged.add(token);
+    final customer = _activeCustomer;
+    if (customer != null) unawaited(syncWithCustomer(customer));
   }
 
   /// Requests notification permission once on the first app launch, including
