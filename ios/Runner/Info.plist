@@ -41,6 +41,8 @@
 	<string>Select a photo to use as your Sri Krishna Pearls profile picture.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Use your location to fill your delivery address.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow location access to help fill your delivery address when you choose Use location. Location is used only to provide this address feature.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
