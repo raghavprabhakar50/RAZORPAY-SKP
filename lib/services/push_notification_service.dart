@@ -131,7 +131,13 @@ class PushNotificationService {
     }
     _registrationInProgress = true;
     try {
-      await FirebaseMessaging.instance.register();
+      // iOS registers with APNs automatically after notification permission
+      // is granted. Calling the explicit FCM register API on Apple devices
+      // can fail before an APNs token is available. Android keeps the
+      // explicit registration path used by the existing implementation.
+      if (!Platform.isIOS) {
+        await FirebaseMessaging.instance.register();
+      }
 
       if (Platform.isIOS) {
         String? apnsToken;
