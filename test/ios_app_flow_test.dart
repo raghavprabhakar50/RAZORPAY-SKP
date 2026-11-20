@@ -84,7 +84,7 @@ void main() {
     expect(project, contains('FlutterGeneratedPluginSwiftPackage'));
     final script = File('scripts/ios_live.sh').readAsStringSync();
     expect(script, contains('BYPASS_PERMISSION_LOCATION_ALWAYS=1'));
-    expect(script, contains('https://shri-middleware.ekarigar.com'));
+    expect(script, contains('https://apps.srikrishnapearls.com'));
   });
 
   testWidgets(

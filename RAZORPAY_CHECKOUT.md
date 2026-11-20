@@ -20,7 +20,7 @@ Razorpay bank/UPI offers. A saved payment retains its original cart/code and
 cannot silently be repriced during recovery. Existing saved quotes may not have
 discount breakdown fields; no historical saving is invented.
 
-API root defaults to https://shri-middleware.ekarigar.com and may be overridden:
+API root defaults to https://apps.srikrishnapearls.com and may be overridden:
 
 ```powershell
 flutter run --dart-define="SKP_MIDDLEWARE_BASE_URL=http://10.0.2.2/Sri%20Krishna%20Pearls%20Middleware"

@@ -2,12 +2,12 @@
 
 ## Live app configuration
 
-The default middleware is `https://shri-middleware.ekarigar.com`. VS Code's first
+The default middleware is `https://apps.srikrishnapearls.com`. VS Code's first
 launch configuration is **Sri Krishna Pearls - Live Middleware**. Alternatively,
 run `powershell -File scripts/run_live.ps1` or build for production with:
 
 ```powershell
-flutter build appbundle --release --dart-define=SKP_MIDDLEWARE_BASE_URL=https://shri-middleware.ekarigar.com
+flutter build appbundle --release --dart-define=SKP_MIDDLEWARE_BASE_URL=https://apps.srikrishnapearls.com
 ```
 
 Do not use `scripts/run_local.ps1` or an old private `.env` file containing a

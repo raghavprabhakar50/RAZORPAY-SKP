@@ -8,7 +8,7 @@ remain the payment flow; no payment is created by opening/closing the browser.
 
 ## Configuration prepared in the repository
 
-- Live middleware: `https://shri-middleware.ekarigar.com`.
+- Live middleware: `https://apps.srikrishnapearls.com`.
 - Existing iOS bundle ID: `com.srikrishnapearls.sriKrishnaPearlsMobile` (unchanged).
 - Shopify callback: `shop.73316171914.app://callback`, registered in Info.plist.
 - Display name and SKP icon match the Android app.

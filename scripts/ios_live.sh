@@ -14,7 +14,7 @@ xcrun --find xcodebuild >/dev/null
 # Only foreground location is used to fill delivery addresses. The plugin's
 # Swift Package manifest reads this while resolving/building native dependencies.
 export BYPASS_PERMISSION_LOCATION_ALWAYS=1
-live_define="--dart-define=SKP_MIDDLEWARE_BASE_URL=https://shri-middleware.ekarigar.com"
+live_define="--dart-define=SKP_MIDDLEWARE_BASE_URL=https://apps.srikrishnapearls.com"
 mode="${1:-check}"
 flutter pub get
 
